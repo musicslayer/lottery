@@ -7,12 +7,44 @@
 		"abi": [
 			{
 				"inputs": [],
-				"name": "chooseWinner",
+				"stateMutability": "payable",
+				"type": "constructor"
+			},
+			{
+				"inputs": [],
+				"name": "chooseWinningAddress",
 				"outputs": [
 					{
 						"internalType": "address payable",
 						"name": "",
 						"type": "address"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "endLottery",
+				"outputs": [],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "fund",
+				"outputs": [],
+				"stateMutability": "payable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "getBalance",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
 					}
 				],
 				"stateMutability": "view",
@@ -139,11 +171,11 @@
 	},
 	"sources": {
 		"contracts/lottery.sol": {
-			"keccak256": "0x57937055250bb2d1d9f560b74884ac5c0483e0d5e878c7b27ae2713154b13dc4",
+			"keccak256": "0xb6494b77dd4b24d5507a51e419b3f0786074c095db4c2eb40df30ecfcf2e05a5",
 			"license": "GPL-3.0",
 			"urls": [
-				"bzz-raw://0883bab5f720b09bf404d7afa1dc8b08137c57474a2229f2616bdfd8d681183d",
-				"dweb:/ipfs/QmfF4qkr3g6TVkEbQ1YqyF4Yi2jaS2YcNPxq8cHHAjdVKx"
+				"bzz-raw://709aab7fd26cc49bf6a157616cba1a9969253c28e375441296e9e356874a4fa7",
+				"dweb:/ipfs/QmQ44gem4YuNnwitRcLctnVckgVSY1vJpPkDz7nsHxZwqx"
 			]
 		}
 	},

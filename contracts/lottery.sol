@@ -9,9 +9,21 @@ pragma solidity >=0.8.12 <0.9.0;
  */
 contract Lottery {
     address payable constant zeroAddress = payable(0x0000000000000000000000000000000000000000);
+    address payable constant operatorAddress = payable(0x1761DF124EC3bADb17Ef3B02167D068f3E542aC9);
 
     mapping(address => bool) public map_isPlaying;
     address payable[] public list_playerAddress;
+
+    constructor() public payable {}
+
+    function fund() external payable {
+        // When addresses pay the contract, they are entered into the lottery.
+        // If they sent too much, return the excess amount.
+        // If they have already entered the lottery, error so the transfer can be reverted.
+
+        //emit Received(msg.sender, msg.value);
+        //registerAddress(payable(msg.sender));
+    }
 
     function registerAddress(address payable playerAddress) public {
         // If address is already playing, we need to error. An address can only enter the lottery once.
@@ -24,11 +36,10 @@ contract Lottery {
     }
     
     function isAddressPlaying(address payable playerAddress) public view returns (bool) {
-        //map_isPlaying[playerAddress] = true;
         return map_isPlaying[playerAddress];
     }
 
-    function chooseWinner() public view returns (address payable) {
+    function chooseWinningAddress() public view returns (address payable) {
         uint numPlayers = list_playerAddress.length;
         uint winner;
 
@@ -49,8 +60,23 @@ contract Lottery {
         return list_playerAddress[winner];
     }
 
+    function endLottery() public view {
+        address payable winningAddress = chooseWinningAddress();
+        if(winningAddress == zeroAddress) {
+            // No one played, so just do nothing.
+        }
+        else {
+            // Give the lottery operator their cut of the pot, and then give the rest to the winner.
+            //winningAddress
+            //operatorAddress
+            //uint256 balance = address(this).balance;
+            //address(this).transfer();
+        }
+    }
 
-
+    function getBalance() public view returns (uint256) {
+        return address(this).balance;
+    }
 
     function randomInt(uint N) public view returns (uint) {
         // Generate a random integer 0 <= n < L.
