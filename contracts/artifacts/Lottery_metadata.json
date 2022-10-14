@@ -12,6 +12,20 @@
 			},
 			{
 				"inputs": [],
+				"name": "addBonusPrizePool",
+				"outputs": [],
+				"stateMutability": "payable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "addContractFunds",
+				"outputs": [],
+				"stateMutability": "payable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
 				"name": "chooseWinningAddress",
 				"outputs": [
 					{
@@ -46,13 +60,6 @@
 			},
 			{
 				"inputs": [],
-				"name": "fundContract",
-				"outputs": [],
-				"stateMutability": "payable",
-				"type": "function"
-			},
-			{
-				"inputs": [],
 				"name": "fundLottery",
 				"outputs": [],
 				"stateMutability": "payable",
@@ -60,7 +67,7 @@
 			},
 			{
 				"inputs": [],
-				"name": "getBalance",
+				"name": "getAccountedContractBalance",
 				"outputs": [
 					{
 						"internalType": "uint256",
@@ -73,7 +80,59 @@
 			},
 			{
 				"inputs": [],
-				"name": "getPrize",
+				"name": "getBonusPrizePool",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "getContractBalance",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "getContractFunds",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "getExtraContractBalance",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "getPlayerPrizePool",
 				"outputs": [
 					{
 						"internalType": "uint256",
@@ -175,9 +234,9 @@
 			},
 			{
 				"inputs": [],
-				"name": "requireContractEnabled",
+				"name": "removeAllContractFunds",
 				"outputs": [],
-				"stateMutability": "view",
+				"stateMutability": "nonpayable",
 				"type": "function"
 			},
 			{
@@ -188,17 +247,21 @@
 						"type": "uint256"
 					}
 				],
-				"name": "withdraw",
+				"name": "removeContractFunds",
 				"outputs": [],
 				"stateMutability": "nonpayable",
 				"type": "function"
 			},
 			{
 				"inputs": [],
-				"name": "withdrawAll",
+				"name": "requireContractEnabled",
 				"outputs": [],
-				"stateMutability": "nonpayable",
+				"stateMutability": "view",
 				"type": "function"
+			},
+			{
+				"stateMutability": "payable",
+				"type": "receive"
 			}
 		],
 		"devdoc": {
@@ -240,11 +303,11 @@
 			]
 		},
 		"contracts/lottery.sol": {
-			"keccak256": "0x2361148a36de3c55a03a1253b4211a542da2b84a00665a2c5b9ccce23b04c911",
+			"keccak256": "0x307c1aacae0c408055f62d5791cfb3479c8eac04f57309f2fa6e85ffc55a6e7f",
 			"license": "GPL-3.0",
 			"urls": [
-				"bzz-raw://47fb290a6d12a420cfd1fd0425397131094a268386986905201f124cae887bc9",
-				"dweb:/ipfs/QmRU7qg2Wrz6BXEmzv83Rw46VW6uYoChwfjoKiAP2sRLWf"
+				"bzz-raw://1603abd13af588ce008313390b029048058a02bc31f3edd4cd70a69e85ca0bfb",
+				"dweb:/ipfs/QmaNkcgPwvsV7HvHBfguAh556NKxBfcoMgJoMV8zQW7CYV"
 			]
 		}
 	},
