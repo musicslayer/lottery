@@ -8,22 +8,19 @@ pragma solidity >=0.7.0 <0.9.0;
  * @custom:dev-run-script ./scripts/deploy_with_ethers.ts
  */
 contract Lottery {
+    mapping(address => bool) public map_isPlaying;
 
-    uint256 number;
+    function registerAddress(address payable playerAddress) public {
+        // If address is already playing, we need to error. An address can only enter the lottery once.
+        bool isPlaying = map_isPlaying[playerAddress];
+        require(!isPlaying, "This address has already entered the lottery.");
 
-    /**
-     * @dev Store value in variable
-     * @param num value to store
-     */
-    function store(uint256 num) public {
-        number = num;
+        // Register this address as a player in the lottery.
+        map_isPlaying[playerAddress] = true;
     }
-
-    /**
-     * @dev Return value 
-     * @return value of 'number'
-     */
-    function retrieve() public view returns (uint256){
-        return number;
+    
+    function isAddressPlaying(address payable playerAddress) public view returns (bool) {
+        //map_isPlaying[playerAddress] = true;
+        return map_isPlaying[playerAddress];
     }
 }

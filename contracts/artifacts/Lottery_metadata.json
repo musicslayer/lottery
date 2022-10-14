@@ -6,13 +6,19 @@
 	"output": {
 		"abi": [
 			{
-				"inputs": [],
-				"name": "retrieve",
+				"inputs": [
+					{
+						"internalType": "address payable",
+						"name": "playerAddress",
+						"type": "address"
+					}
+				],
+				"name": "isAddressPlaying",
 				"outputs": [
 					{
-						"internalType": "uint256",
+						"internalType": "bool",
 						"name": "",
-						"type": "uint256"
+						"type": "bool"
 					}
 				],
 				"stateMutability": "view",
@@ -21,12 +27,31 @@
 			{
 				"inputs": [
 					{
-						"internalType": "uint256",
-						"name": "num",
-						"type": "uint256"
+						"internalType": "address",
+						"name": "",
+						"type": "address"
 					}
 				],
-				"name": "store",
+				"name": "map_isPlaying",
+				"outputs": [
+					{
+						"internalType": "bool",
+						"name": "",
+						"type": "bool"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address payable",
+						"name": "playerAddress",
+						"type": "address"
+					}
+				],
+				"name": "registerAddress",
 				"outputs": [],
 				"stateMutability": "nonpayable",
 				"type": "function"
@@ -36,20 +61,7 @@
 			"custom:dev-run-script": "./scripts/deploy_with_ethers.ts",
 			"details": "A blockchain lottery",
 			"kind": "dev",
-			"methods": {
-				"retrieve()": {
-					"details": "Return value ",
-					"returns": {
-						"_0": "value of 'number'"
-					}
-				},
-				"store(uint256)": {
-					"details": "Store value in variable",
-					"params": {
-						"num": "value to store"
-					}
-				}
-			},
+			"methods": {},
 			"title": "Lottery",
 			"version": 1
 		},
@@ -76,11 +88,11 @@
 	},
 	"sources": {
 		"contracts/lottery.sol": {
-			"keccak256": "0x294a88c3bb5fc92ea6c2dc2e6165df28250ccdf6865c06283e4ff6fa81bc57b8",
+			"keccak256": "0x1a3c9294861491b0273fc7c0bd098fbd41eec010ee033d5ce5dcc31ce17264b7",
 			"license": "GPL-3.0",
 			"urls": [
-				"bzz-raw://25e38f2414c3318048ce0ac9cc22d68631f4b833f811eff92504a441537913a1",
-				"dweb:/ipfs/QmS7jhKk27daEbMR2BVF7mQUn129AxtLwNovc5f8HCEMG5"
+				"bzz-raw://f4668fbe9efdd334a0e699aa65ab7ad077f190ab052dee944b43b1a40c351f0b",
+				"dweb:/ipfs/QmQoWg9VQLKsgruWs6igcC4sCQBQ6FFcLSghxXmMYw3WsR"
 			]
 		}
 	},

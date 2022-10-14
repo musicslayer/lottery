@@ -24,7 +24,8 @@ async function async_changeValue() {
     await call_store.wait();
 
     // Call the retrieve function on the contract to get the value we stored previously.
-    let value = (await lotteryContract.retrieve()).toNumber();
+    const call_retrieve = await storageContract.retrieve();
+    let value = call_retrieve.toNumber();
     console.log('Value: ' + value);
 }
 
