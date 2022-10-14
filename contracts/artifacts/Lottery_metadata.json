@@ -1,10 +1,23 @@
 {
 	"compiler": {
-		"version": "0.8.7+commit.e28d00a7"
+		"version": "0.8.17+commit.8df45f5f"
 	},
 	"language": "Solidity",
 	"output": {
 		"abi": [
+			{
+				"inputs": [],
+				"name": "chooseWinner",
+				"outputs": [
+					{
+						"internalType": "address payable",
+						"name": "",
+						"type": "address"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
 			{
 				"inputs": [
 					{
@@ -27,6 +40,25 @@
 			{
 				"inputs": [
 					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"name": "list_playerAddress",
+				"outputs": [
+					{
+						"internalType": "address payable",
+						"name": "",
+						"type": "address"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
 						"internalType": "address",
 						"name": "",
 						"type": "address"
@@ -38,6 +70,25 @@
 						"internalType": "bool",
 						"name": "",
 						"type": "bool"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "uint256",
+						"name": "N",
+						"type": "uint256"
+					}
+				],
+				"name": "randomInt",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
 					}
 				],
 				"stateMutability": "view",
@@ -88,11 +139,11 @@
 	},
 	"sources": {
 		"contracts/lottery.sol": {
-			"keccak256": "0x1a3c9294861491b0273fc7c0bd098fbd41eec010ee033d5ce5dcc31ce17264b7",
+			"keccak256": "0x57937055250bb2d1d9f560b74884ac5c0483e0d5e878c7b27ae2713154b13dc4",
 			"license": "GPL-3.0",
 			"urls": [
-				"bzz-raw://f4668fbe9efdd334a0e699aa65ab7ad077f190ab052dee944b43b1a40c351f0b",
-				"dweb:/ipfs/QmQoWg9VQLKsgruWs6igcC4sCQBQ6FFcLSghxXmMYw3WsR"
+				"bzz-raw://0883bab5f720b09bf404d7afa1dc8b08137c57474a2229f2616bdfd8d681183d",
+				"dweb:/ipfs/QmfF4qkr3g6TVkEbQ1YqyF4Yi2jaS2YcNPxq8cHHAjdVKx"
 			]
 		}
 	},

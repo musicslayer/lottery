@@ -31,7 +31,12 @@ async function isAddressPlaying(lotteryContract, playerAddress) {
     return call_isAddressPlaying;
 }
 
-async function async_playLottery() {
+async function chooseWinner(lotteryContract) {
+    const call_chooseWinner = await lotteryContract.chooseWinner();
+    return call_chooseWinner;
+}
+
+async function async_playLotteryDebug() {
     // Deploy contract and then use address to access contract object.
     let lotteryAddress = await deployContract();
     const lotteryContract = await ethers.getContractAt("Lottery", lotteryAddress);
@@ -45,18 +50,33 @@ async function async_playLottery() {
     await registerAddress(lotteryContract, pA1);
 
     console.log('isPlaying: ' + await isAddressPlaying(lotteryContract, pA1));
-
-    console.log('T');
     
-    // Register it again and error.
+    // Register the same address again and error.
     try {
-        await registerAddress(lotteryContract, pA2);
+        await registerAddress(lotteryContract, pA1);
     }
     catch(err) {
         handleError(err);
     }
 
-    console.log('V');
+    // Register a different address.
+    await registerAddress(lotteryContract, pA2);
+
+    console.log('Winner: ' + await chooseWinner(lotteryContract));
+}
+
+async function async_playLottery() {
+    // Deploy contract and then use address to access contract object.
+    let lotteryAddress = await deployContract();
+    const lotteryContract = await ethers.getContractAt("Lottery", lotteryAddress);
+
+    pA1 = "0xc0ffee254729296a45a3885639AC7E10F9d54979";
+    pA2 = "0x999999cf1046e68e36E1aA2E0E07105eDDD1f08E";
+
+    //await registerAddress(lotteryContract, pA1);
+    //await registerAddress(lotteryContract, pA2);
+
+    console.log('Winner: ' + await chooseWinner(lotteryContract));
 }
 
 async_playLottery().catch(handleError);
