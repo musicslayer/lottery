@@ -34,8 +34,13 @@ contract Lottery {
     uint bonusPrizePool;
 
     // Variables to keep track of who is playing and how many tickets they have.
-    mapping(address => bool) public map_isPlaying;
-    address payable[] public list_playerAddress;
+    //mapping(address => bool) public map_isPlaying;
+    //address payable[] public list_playerAddress;
+
+    uint currentTicketNumber;
+    uint ticketPrice = 100000000;
+    mapping(uint => address payable) public map_ticket2Address;
+    mapping(address => uint) public map_address2NumTickets;
 
     /*
         Standard Contract Functions
@@ -48,15 +53,27 @@ contract Lottery {
 
     receive() external payable {
         // If a player sends money, then give them tickets. If the operator sends money, then add it to the contract funds.
-        if(msg.sender == operatorAddress) {
-            requireContractEnabled();
+        address payable sender = payable(msg.sender);
+        uint value = msg.value;
 
-            contractFunds += msg.value;
-            //addContractFunds() // Can we call this without paying again?
+        if(sender == operatorAddress) {
+            contractFunds += value;
         }
         else {
-            playerPrizePool += msg.value;
-            registerAddress(payable(msg.sender));
+            requireContractEnabled();
+
+            // Each ticket has a fixed cost. After spending all the funds on tickets, anything left over will be given back to the player.
+            uint numTickets = value / ticketPrice;
+            playerPrizePool += numTickets * ticketPrice;
+
+            map_address2NumTickets[sender] += numTickets;
+
+            for(uint i = 0; i < numTickets; i++) {
+                map_ticket2Address[currentTicketNumber++] = sender;
+            }
+
+            // TODO send leftover funds back.
+
             //fundLottery() // Can we call this without paying again?
         }
     }
@@ -65,24 +82,9 @@ contract Lottery {
         Lottery Functions
     */
 
-    function registerAddress(address payable playerAddress) public {
-        // If address is already playing, we need to error. An address can only enter the lottery once.
-        bool isPlaying = map_isPlaying[playerAddress];
-        require(!isPlaying, "This address has already entered the lottery.");
-
-        // Register this address as a player in the lottery.
-        map_isPlaying[playerAddress] = true;
-        list_playerAddress.push(playerAddress);
-    }
-    
-    function isAddressPlaying(address payable playerAddress) public view returns (bool) {
-        requireContractEnabled();
-        return map_isPlaying[playerAddress];
-    }
-
     function chooseWinningAddress() public view returns (address payable) {
-        uint numPlayers = list_playerAddress.length;
-        uint winner;
+        uint numPlayers = currentTicketNumber;
+        uint winningTicket;
 
         // If less than 2 people are playing, deal with these cases manually.
         if(numPlayers == 0) {
@@ -91,14 +93,14 @@ contract Lottery {
         }
         else if(numPlayers == 1) {
             // Don't bother generating a random number. It's a waste of gas and/or time in this case.
-            winner = 0;
+            winningTicket = 0;
         }
         else {
             // Randomly pick a winner from all the player addresses. Each address should have an equal chance of winning.
-            winner = randomInt(numPlayers);
+            winningTicket = randomInt(numPlayers);
         }
 
-        return list_playerAddress[winner];
+        return map_ticket2Address[winningTicket];
     }
 
     function endLottery() public {
@@ -159,24 +161,48 @@ contract Lottery {
         contractFunds += msg.value;
     }
 
+    function getContractBalance() public view returns (uint) {
+        // This is the true contract balance. This includes everything, including player funds.
+        return address(this).balance;
+    }
+
+    function getAccountedContractBalance() public view returns (uint) {
+        return contractFunds + playerPrizePool + bonusPrizePool;
+    }
+
+    function getExtraContractBalance() public view returns (uint) {
+        // Returns the amount of "extra" funds this contract has. This should usually be zero, but may be more if funds are sent here in ways that cannot be accounted for.
+        // For example, a coinbase transaction or another contract calling "selfdestruct" could send funds here without passing through the "receive" function for proper accounting.
+        assert(getContractBalance() >= getAccountedContractBalance());
+        return getContractBalance() - getAccountedContractBalance();
+    }
+
+    function getOperatorContractBalance() public view returns (uint) {
+        // This is the balance that the operator has access to.
+        return contractFunds + getExtraContractBalance();
+    }
+
     function removeContractFunds(uint amount) public {
         // Transfer an amount from the contract balance to the operator.
-        uint balance = getContractBalance();
-        require(amount <= balance, string.concat("The amount ", Strings.toString(amount), " is greater than the contract balance ", Strings.toString(balance)));
-        contractFunds -= amount;
+        uint operatorContractBalance = getOperatorContractBalance();
+        require(amount <= operatorContractBalance, string.concat("The amount ", Strings.toString(amount), " is greater than the contract balance ", Strings.toString(operatorContractBalance)));
+
+        // Any extra funds should be taken into account first, then subtract from "contractFunds".
+        contractFunds -= (amount - getExtraContractBalance());
         operatorAddress.transfer(amount);
     }
 
     function removeAllContractFunds() public {
         // Transfer the entire contract balance to the operator.
         contractFunds = 0;
-        operatorAddress.transfer(getContractBalance());
+        operatorAddress.transfer(getOperatorContractBalance());
     }
 
     function getPlayerPrizePool() external view returns (uint) {
         return playerPrizePool;
     }
 
+/*
     function fundLottery() external payable {
         // When addresses pay the contract, they are entered into the lottery.
         // If they sent too much, return the excess amount.
@@ -186,6 +212,7 @@ contract Lottery {
         playerPrizePool += msg.value;
         registerAddress(payable(msg.sender));
     }
+*/
 
     function getBonusPrizePool() external view returns (uint) {
         return bonusPrizePool;
@@ -196,19 +223,37 @@ contract Lottery {
         bonusPrizePool += msg.value;
     }
 
-    function getContractBalance() public view returns (uint) {
-        return address(this).balance;
+    /*
+        Query Functions
+    */
+
+    function isAddressPlaying(address payable playerAddress) public view returns (bool) {
+        return map_address2NumTickets[playerAddress] > 0;
     }
 
-    function getAccountedContractBalance() public view returns (uint) {
-        return contractFunds + playerPrizePool + bonusPrizePool;
+    function totalAddressTickets(address payable playerAddress) public view returns (uint) {
+        return map_address2NumTickets[playerAddress];
     }
 
-    function getExtraContractBalance() external view returns (uint) {
-        // Returns the amount of "extra" funds this contract has. This should usually be zero, but may be more if funds are sent here in ways that cannot be accounted for.
-        // For example, a coinbase transaction or another contract calling "selfdestruct" could send funds here without passing through the "receive" function for proper accounting.
-        assert(getContractBalance() >= getAccountedContractBalance());
-        return getContractBalance() - getAccountedContractBalance();
+    function totalTickets() public view returns (uint) {
+        return currentTicketNumber;
+    }
+
+    function addressWinChanceString(address payable playerAddress) public view returns (string memory) {
+        // Returns the probability that this address will win as a truncated decimal between 0 and 100.
+        // Since solidity only supports integers, we must use extra steps to present a decimal.
+        if(totalTickets() == 0) {
+            return "";
+        }
+        uint numDecimalPlaces = 4;
+        uint numerator = totalAddressTickets(playerAddress) * 100;
+        uint denominator = totalTickets();
+
+        uint chance_front = numerator / denominator;
+        uint chance_mod = (numerator % denominator) * (10 ** numDecimalPlaces);
+        uint chance_back = chance_mod / denominator;
+
+        return string.concat(Strings.toString(chance_front), ".", Strings.toString(chance_back), "%");
     }
 
     /*
