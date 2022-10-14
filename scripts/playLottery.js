@@ -34,16 +34,24 @@ async function chooseWinningAddress(lotteryContract) {
     return call_chooseWinningAddress;
 }
 
-async function fund(lotteryContract, amount) {
-    //const call_fund = await lotteryContract.fund(amount);
-    //await call_fund.wait();
+async function fundLottery(lotteryContract, amount) {
+    const call_fundLottery = await lotteryContract.fundLottery({ value: ethers.utils.parseEther(amount) });
+    await call_fundLottery.wait();
+}
 
-    //const call_receive = await lotteryContract.receive();
-    //await call_receive.wait();
+async function fundContract(lotteryContract, amount) {
+    const call_fundContract = await lotteryContract.fundContract({ value: ethers.utils.parseEther(amount) });
+    await call_fundContract.wait();
+}
 
-    //const call_fund = await lotteryContract.fund({ value: amount });
-    const call_fund = await lotteryContract.fund({ value: ethers.utils.parseEther(amount) });
-    await call_fund.wait();
+async function endLottery(lotteryContract) {
+    console.log('X');
+
+    const call_endLottery = await lotteryContract.endLottery();
+
+    console.log('Y');
+
+    return call_endLottery;
 }
 
 async function getBalance(lotteryContract) {
@@ -82,21 +90,27 @@ async function async_playLotteryDebug() {
 
 async function async_playLottery() {
     // Deploy contract and then use address to access contract object.
-    startingBalance = "0.000001";
-    let lotteryAddress = await deployContract(startingBalance);
+    let lotteryAddress = await deployContract("0.000001");
     const lotteryContract = await ethers.getContractAt("Lottery", lotteryAddress);
 
-    pA1 = "0xc0ffee254729296a45a3885639AC7E10F9d54979";
-    pA2 = "0x999999cf1046e68e36E1aA2E0E07105eDDD1f08E";
+    //pA1 = "0xc0ffee254729296a45a3885639AC7E10F9d54979";
+    pA1 = "0xdD870fA1b7C4700F2BD7f44238821C26f7392148";
+    //pA2 = "0x999999cf1046e68e36E1aA2E0E07105eDDD1f08E";
 
-    //await registerAddress(lotteryContract, pA1);
+    await registerAddress(lotteryContract, pA1);
     //await registerAddress(lotteryContract, pA2);
 
     console.log('Winner: ' + await chooseWinningAddress(lotteryContract));
 
-    await fund(lotteryContract, "0.00000000723");
+    await fundLottery(lotteryContract, "0.00000000723");
 
-    console.log('Balance: ' + await getBalance(lotteryContract));
+    await fundContract(lotteryContract, "0.00002");
+
+    console.log('Balance Before: ' + await getBalance(lotteryContract));
+
+    await endLottery(lotteryContract);
+
+    console.log('Balance After: ' + await getBalance(lotteryContract));
 }
 
 async_playLottery().catch(handleError);

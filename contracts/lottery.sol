@@ -2,27 +2,43 @@
 
 pragma solidity >=0.8.12 <0.9.0;
 
+import "@openzeppelin/contracts/utils/Strings.sol";
+
 /**
  * @title Lottery
  * @dev A blockchain lottery
  * @custom:dev-run-script ./scripts/deploy_with_ethers.ts
  */
 contract Lottery {
+    // Global switch to turn the lottery on and off.
+    bool isContractEnabled;
+
     address payable constant zeroAddress = payable(0x0000000000000000000000000000000000000000);
-    address payable constant operatorAddress = payable(0x1761DF124EC3bADb17Ef3B02167D068f3E542aC9);
+    //address payable constant operatorAddress = payable(0x1761DF124EC3bADb17Ef3B02167D068f3E542aC9);
+    address payable constant operatorAddress = payable(0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2);
+    uint constant operatorCut = 10; // int between 0 and 100 representing the percentage of the pot that the operator takes every game.
+
+    uint totalPrize;
 
     mapping(address => bool) public map_isPlaying;
     address payable[] public list_playerAddress;
 
-    constructor() public payable {}
+    constructor() payable {
+        isContractEnabled = true;
+    }
 
-    function fund() external payable {
+    function requireContractEnabled() public view {
+        require(isContractEnabled, "This contract is currently disabled.");
+    }
+
+    function fundLottery() external payable {
         // When addresses pay the contract, they are entered into the lottery.
         // If they sent too much, return the excess amount.
         // If they have already entered the lottery, error so the transfer can be reverted.
+        requireContractEnabled();
 
-        //emit Received(msg.sender, msg.value);
-        //registerAddress(payable(msg.sender));
+        totalPrize += msg.value;
+        registerAddress(payable(msg.sender));
     }
 
     function registerAddress(address payable playerAddress) public {
@@ -36,6 +52,7 @@ contract Lottery {
     }
     
     function isAddressPlaying(address payable playerAddress) public view returns (bool) {
+        requireContractEnabled();
         return map_isPlaying[playerAddress];
     }
 
@@ -60,21 +77,43 @@ contract Lottery {
         return list_playerAddress[winner];
     }
 
-    function endLottery() public view {
+    function endLottery() public {
         address payable winningAddress = chooseWinningAddress();
         if(winningAddress == zeroAddress) {
             // No one played, so just do nothing.
         }
         else {
             // Give the lottery operator their cut of the pot, and then give the rest to the winner.
-            //winningAddress
-            //operatorAddress
-            //uint256 balance = address(this).balance;
-            //address(this).transfer();
+            uint operatorPrize = totalPrize * operatorCut / 100;
+            uint winnerPrize = totalPrize - operatorPrize;
+            totalPrize = 0;
+            operatorAddress.transfer(operatorPrize);
+            winningAddress.transfer(winnerPrize);
         }
     }
 
-    function getBalance() public view returns (uint256) {
+    function fundContract() external payable {
+        // Directly fund the contract. This does not add to the prize or enter any addresses into the lottery.
+        // This should only be called by the lottery operator to give the contract gas.
+    }
+
+    function withdrawAll() public {
+        // Transfer the entire contract balance to the operator.
+        operatorAddress.transfer(getBalance());
+    }
+
+    function withdraw(uint amount) public {
+        // Transfer an amount from the contract balance to the operator.
+        uint balance = getBalance();
+        require(amount <= balance, string.concat("The amount ", Strings.toString(amount), " is greater than the contract balance ", Strings.toString(balance)));
+        operatorAddress.transfer(amount);
+    }
+
+    function getPrize() public view returns (uint) {
+        return totalPrize;
+    }
+
+    function getBalance() public view returns (uint) {
         return address(this).balance;
     }
 
@@ -84,7 +123,17 @@ contract Lottery {
         return randomHash % N;
     }
 
-/*
+    function enableContract() public {
+        // Enable the ability for players to enter the lottery.
+        isContractEnabled = true;
+    }
+
+    function disableContract() public {
+        // Disable the ability for players to enter the lottery.
+        isContractEnabled = false;
+    }
+
+    /*
     function toString(address account) public pure returns(string memory) {
         return toString(abi.encodePacked(account));
     }
@@ -109,5 +158,5 @@ contract Lottery {
         }
         return string(str);
     }
-*/
+    */
 }

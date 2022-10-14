@@ -25,14 +25,35 @@
 			},
 			{
 				"inputs": [],
-				"name": "endLottery",
+				"name": "disableContract",
 				"outputs": [],
-				"stateMutability": "view",
+				"stateMutability": "nonpayable",
 				"type": "function"
 			},
 			{
 				"inputs": [],
-				"name": "fund",
+				"name": "enableContract",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "endLottery",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "fundContract",
+				"outputs": [],
+				"stateMutability": "payable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "fundLottery",
 				"outputs": [],
 				"stateMutability": "payable",
 				"type": "function"
@@ -40,6 +61,19 @@
 			{
 				"inputs": [],
 				"name": "getBalance",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "getPrize",
 				"outputs": [
 					{
 						"internalType": "uint256",
@@ -138,6 +172,33 @@
 				"outputs": [],
 				"stateMutability": "nonpayable",
 				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "requireContractEnabled",
+				"outputs": [],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					}
+				],
+				"name": "withdraw",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [],
+				"name": "withdrawAll",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
 			}
 		],
 		"devdoc": {
@@ -170,12 +231,20 @@
 		"remappings": []
 	},
 	"sources": {
+		"@openzeppelin/contracts/utils/Strings.sol": {
+			"keccak256": "0xaf159a8b1923ad2a26d516089bceca9bdeaeacd04be50983ea00ba63070f08a3",
+			"license": "MIT",
+			"urls": [
+				"bzz-raw://6f2cf1c531122bc7ca96b8c8db6a60deae60441e5223065e792553d4849b5638",
+				"dweb:/ipfs/QmPBdJmBBABMDCfyDjCbdxgiqRavgiSL88SYPGibgbPas9"
+			]
+		},
 		"contracts/lottery.sol": {
-			"keccak256": "0xb6494b77dd4b24d5507a51e419b3f0786074c095db4c2eb40df30ecfcf2e05a5",
+			"keccak256": "0x2361148a36de3c55a03a1253b4211a542da2b84a00665a2c5b9ccce23b04c911",
 			"license": "GPL-3.0",
 			"urls": [
-				"bzz-raw://709aab7fd26cc49bf6a157616cba1a9969253c28e375441296e9e356874a4fa7",
-				"dweb:/ipfs/QmQ44gem4YuNnwitRcLctnVckgVSY1vJpPkDz7nsHxZwqx"
+				"bzz-raw://47fb290a6d12a420cfd1fd0425397131094a268386986905201f124cae887bc9",
+				"dweb:/ipfs/QmRU7qg2Wrz6BXEmzv83Rw46VW6uYoChwfjoKiAP2sRLWf"
 			]
 		}
 	},
