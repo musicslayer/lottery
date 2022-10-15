@@ -8,6 +8,9 @@ pragma solidity >=0.8.12 <0.9.0;
  * @custom:dev-run-script ./scripts/deploy_with_ethers.ts
  */
 contract Lottery {
+    /// Reentrancy has been detected.
+    error Reentrancy();
+    
     /// This contract is currently disabled.
     error ContractDisabled();
 
@@ -29,6 +32,9 @@ contract Lottery {
 
     // The price of each ticket. Tickets must be purchased in integer quantities.
     uint private constant ticketPrice = 1e16; // 0.01 ETH
+
+    // A lock variable to prevent reentrancy. Note that a function using the lock cannot call another function that is also using the lock.
+    bool private lock;
 
     // Switch to turn the lottery on and off.
     bool private isContractEnabled;
@@ -315,6 +321,23 @@ contract Lottery {
     }
 
     /*
+        Reentrancy Functions
+    */
+
+    function lock_start() private {
+        // Call this at the start of each external function. If the lock is already set, we error to prevent reentrancy.
+        if(lock) {
+            revert Reentrancy();
+        }
+        lock = true;
+    }
+
+    function lock_end() private {
+        // Call this at the end of each external function.
+        lock = false;
+    }
+
+    /*
         Utility Functions
     */
 
@@ -329,46 +352,81 @@ contract Lottery {
 
     function action_fundContract() external payable {
         // The operator can call this to give gas to the contract.
+        lock_start();
+
         requireOperatorAddress(msg.sender);
+
         fundContract(msg.value);
+
+        lock_end();
     }
 
     function action_buyTickets() external payable {
         // Players can call this to buy tickets for the lottery.
+        lock_start();
+
         requireContractEnabled();
         requirePayableAddress(msg.sender);
         requirePlayerAddress(msg.sender);
+
         buyTickets(msg.sender, msg.value);
+
+        lock_end();
     }
 
     function action_endLottery() external {
         // The operator can call this to end the lottery and distribute the prize to the winner.
+        lock_start();
+
         requireOperatorAddress(msg.sender);
+
         endLottery();
+
+        lock_end();
     }
 
     function action_setContractEnabled(bool isEnabled) external {
         // The operator can call this to enable or disable the ability for players to enter the lottery.
+        lock_start();
+
         requireOperatorAddress(msg.sender);
+
         setContractEnabled(isEnabled);
+
+        lock_end();
     }
 
     function action_removeContractFunds(uint value) external {
         // The operator can call this to disable the ability for players to enter the lottery.
+        lock_start();
+
         requireOperatorAddress(msg.sender);
+
         removeContractFunds(value);
+
+        lock_end();
     }
 
     function action_removeAllContractFunds() external {
         // The operator can call this to disable the ability for players to enter the lottery.
+        lock_start();
+
         requireOperatorAddress(msg.sender);
+
         removeAllContractFunds();
+
+        lock_end();
     }
 
     function action_setOperatorAddress(address newOperatorAddress) external {
         // The current operator can assign the operator role to a new address.
+        lock_start();
+
         requireOperatorAddress(msg.sender);
+
         setOperatorAddress(newOperatorAddress);
+
+        lock_end();
     }
 
     function query_getContractBalance() external view returns (uint) {
