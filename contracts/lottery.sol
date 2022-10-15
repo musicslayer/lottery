@@ -9,22 +9,25 @@ pragma solidity >=0.8.12 <0.9.0;
  */
 contract Lottery {
     /// Reentrancy has been detected.
-    error Reentrancy();
+    error ReentrancyError();
     
     /// This contract is currently disabled.
-    error ContractDisabled();
+    error ContractDisabledError();
 
     /// The calling address is not the operator.
-    error NotOperator();
+    error NotOperatorError();
 
     /// The calling address is not an eligible player.
-    error NotPlayer();
+    error NotPlayerError();
 
     /// The calling address is not payable.
-    error NotPayable();
+    error NotPayableError();
 
     /// This contract does not have the funds requested.
-    error InsufficientFunds(uint contractBalance, uint requestedValue);
+    error InsufficientFundsError(uint contractBalance, uint requestedValue);
+
+    // A record of a completed lottery.
+    event LotteryEvent(uint indexed blockNumber, address indexed winningAddress, uint indexed winnerPrize);
 
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     // Note that the player always receives the entire "bonusPrizePool" amount.
@@ -34,13 +37,13 @@ contract Lottery {
     uint private constant ticketPrice = 1e16; // 0.01 ETH
 
     // A lock variable to prevent reentrancy. Note that a function using the lock cannot call another function that is also using the lock.
-    bool private lock;
+    bool private isLocked;
 
     // Switch to turn the lottery on and off.
     bool private isContractEnabled;
 
     // The operator is responsible for running the lottery. They must fund this contract with gas, and in return they will receive a cut of each prize.
-    address private operatorAddress = 0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2;
+    address private operatorAddress;
 
     /* To ensure the safety of player money, the contract balance is accounted for by splitting it into three different places:
         // contractFunds - The money used to pay for gas. The operator can add or remove money at will.
@@ -57,13 +60,17 @@ contract Lottery {
     mapping(uint => address) private map_ticket2Address;
     mapping(address => uint) private map_address2NumTickets;
 
+    // Mapping of addresses to the prize winnings they have yet to claim.
+    mapping(address => uint) private map_address2Winnings;
+
     /*
         Contract Functions
     */
 
-    constructor(address /*initialOperatorAddress*/) payable {
+    constructor(address initialOperatorAddress) payable {
         // When deploying this contract, initial funds should be paid to allow for smooth lottery operation.
         isContractEnabled = true;
+        operatorAddress = initialOperatorAddress;
         addContractFunds(msg.value);
     }
 
@@ -111,12 +118,14 @@ contract Lottery {
             map_ticket2Address[currentTicketNumber++] = playerAddress;
         }
 
-        sendToAddress(playerAddress, value);
+        // ??? Should we just take the extra ???
+        //sendToAddress(playerAddress, value);
     }
 
     function endLottery() private {
         if(isZeroPlayerGame()) {
-            // No one played, so just do nothing.
+            // No one played.
+            emit LotteryEvent(block.number, address(0), 0);
         }
         else if(isOnePlayerGame()) {
             // Since only one person has played, just give them the entire prize.
@@ -125,7 +134,10 @@ contract Lottery {
             uint winnerPrize = bonusPrizePool + playerPrizePool;
 
             resetLottery();
-            sendToAddress(winningAddress, winnerPrize);
+            
+            map_address2Winnings[winningAddress] += winnerPrize;
+
+            emit LotteryEvent(block.number, winningAddress, winnerPrize);
         }
         else {
             // Give the lottery operator their cut of the pot, and then give the rest to a randomly chosen winner.
@@ -136,8 +148,11 @@ contract Lottery {
             uint winnerPrize = playerPrizePool + bonusPrizePool - operatorPrize;
 
             resetLottery();
-            sendToAddress(getOperatorAddress(), operatorPrize);
-            sendToAddress(winningAddress, winnerPrize);
+
+            map_address2Winnings[getOperatorAddress()] += operatorPrize;
+            map_address2Winnings[winningAddress] += winnerPrize;
+
+            emit LotteryEvent(block.number, winningAddress, winnerPrize);
         }
     }
 
@@ -185,6 +200,12 @@ contract Lottery {
         bonusPrizePool = 0;
     }
 
+    function withdrawWinnings(address playerAddress) private {
+        uint winnings = map_address2Winnings[playerAddress];
+        map_address2Winnings[playerAddress] = 0;
+        transferToAddress(playerAddress, winnings);
+    }
+
     /*
         RNG Functions
     */
@@ -209,7 +230,7 @@ contract Lottery {
 
     function requireContractEnabled() private view {
         if(!getContractEnabled()) {
-            revert ContractDisabled();
+            revert ContractDisabledError();
         }
     }
 
@@ -227,7 +248,7 @@ contract Lottery {
 
     function requireOperatorAddress(address sender) private view {
         if(!isOperatorAddress(sender)) {
-            revert NotOperator();
+            revert NotOperatorError();
         }
     }
 
@@ -238,7 +259,7 @@ contract Lottery {
 
     function requirePlayerAddress(address sender) private view {
         if(!isPlayerAddress(sender)) {
-            revert NotPlayer();
+            revert NotPlayerError();
         }
     }
 
@@ -249,7 +270,7 @@ contract Lottery {
 
     function requirePayableAddress(address testAddress) private {
         if(!isPayableAddress(testAddress)) {
-            revert NotPayable();
+            revert NotPayableError();
         }
     }
 
@@ -266,20 +287,20 @@ contract Lottery {
         uint operatorContractBalance = getOperatorContractBalance();
 
         if(value > operatorContractBalance) {
-            revert InsufficientFunds(operatorContractBalance, value);
+            revert InsufficientFundsError(operatorContractBalance, value);
         }
 
         // If the value is higher than the extra funds, subtract the difference from "contractFunds". This accounting makes it so extra funds are spent first.
         if(value > getExtraContractBalance()) {
             contractFunds -= (value - getExtraContractBalance());
         }
-        sendToAddress(getOperatorAddress(), value);
+        transferToAddress(getOperatorAddress(), value);
     }
 
     function removeAllContractFunds() private {
         // Transfer the entire contract balance to the operator.
         contractFunds = 0;
-        sendToAddress(getOperatorAddress(), getOperatorContractBalance());
+        transferToAddress(getOperatorAddress(), getOperatorContractBalance());
     }
 
     function getContractFunds() private view returns (uint) {
@@ -324,24 +345,32 @@ contract Lottery {
         Reentrancy Functions
     */
 
+    function setLock(bool newIsLocked) private {
+        isLocked = newIsLocked;
+    }
+
+    function getLock() private view returns (bool) {
+        return isLocked;
+    }
+
     function lock_start() private {
         // Call this at the start of each external function. If the lock is already set, we error to prevent reentrancy.
-        if(lock) {
-            revert Reentrancy();
+        if(getLock()) {
+            revert ReentrancyError();
         }
-        lock = true;
+        setLock(true);
     }
 
     function lock_end() private {
         // Call this at the end of each external function.
-        lock = false;
+        setLock(false);
     }
 
     /*
         Utility Functions
     */
 
-    function sendToAddress(address recipientAddress, uint value) private {
+    function transferToAddress(address recipientAddress, uint value) private {
         // The caller is responsible for making sure that the address is actually payable.
         payable(recipientAddress).transfer(value);
     }
@@ -349,6 +378,12 @@ contract Lottery {
     /*
         External Functions
     */
+
+    function action_unlock() external {
+        // The operator can call this to unlock (not lock) the contract. This is a fail-safe in case something unanticipated has happened.
+        requireOperatorAddress(msg.sender);
+        setLock(false);
+    }
 
     function action_fundContract() external payable {
         // The operator can call this to give gas to the contract.
@@ -427,6 +462,19 @@ contract Lottery {
         setOperatorAddress(newOperatorAddress);
 
         lock_end();
+    }
+
+    function action_withdrawWinnings(address playerAddress) external {
+        // Both players and the operator can manually transfer their winnings to their address.
+        lock_start();
+
+        withdrawWinnings(playerAddress);
+
+        lock_end();
+    }
+
+    function query_getLock() external view returns (bool) {
+        return getLock();
     }
 
     function query_getContractBalance() external view returns (uint) {

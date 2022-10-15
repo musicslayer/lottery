@@ -11,7 +11,7 @@ async function deployContract(startingBalance) {
     const lotteryFactory = await ethers.getContractFactory("Lottery");
 
     // Deploy the contract to a random address.
-    const lotteryContract = await lotteryFactory.deploy({ value: ethers.utils.parseEther(startingBalance) });
+    const lotteryContract = await lotteryFactory.deploy("0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2", { value: ethers.utils.parseEther(startingBalance) });
     await lotteryContract.deployed();
 
     // Access address.
