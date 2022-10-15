@@ -11,8 +11,11 @@ contract Lottery {
     /// Reentrancy has been detected.
     error ReentrancyError();
     
-    /// This contract is currently disabled.
-    error ContractDisabledError();
+    /// There is no active lottery.
+    error LotteryInactiveError();
+
+    // The lottery is still active and is not ready to be ended.
+    error LotteryActiveError();
 
     /// The calling address is not the operator.
     error NotOperatorError();
@@ -27,23 +30,28 @@ contract Lottery {
     error InsufficientFundsError(uint contractBalance, uint requestedValue);
 
     // A record of a completed lottery.
-    event LotteryEvent(uint indexed blockNumber, address indexed winningAddress, uint indexed winnerPrize);
+    event LotteryEvent(uint indexed lotteryBlockStart, address indexed winningAddress, uint indexed winnerPrize);
 
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     // Note that the player always receives the entire "bonusPrizePool" amount.
     uint private constant operatorCut = 3;
 
-    // The price of each ticket. Tickets must be purchased in integer quantities.
-    uint private constant ticketPrice = 1e16; // 0.01 ETH
-
     // A lock variable to prevent reentrancy. Note that a function using the lock cannot call another function that is also using the lock.
     bool private isLocked;
 
-    // Switch to turn the lottery on and off.
-    bool private isContractEnabled;
+    // Block where the lottery started.
+    uint private lotteryBlockStart;
+
+    // The number of additional blocks after the starting block where players may purchase tickets.
+    // After this duration, anyone may end the lottery to distribute prizes and start a new lottery.
+    uint private lotteryBlockDuration;
 
     // The operator is responsible for running the lottery. They must fund this contract with gas, and in return they will receive a cut of each prize.
     address private operatorAddress;
+
+    // The price of each ticket. If the price is changed, the new price will only apply to future lotteries, not the current one.
+    uint private ticketPrice;
+    uint private currentTicketPrice;
 
     /* To ensure the safety of player money, the contract balance is accounted for by splitting it into three different places:
         // contractFunds - The money used to pay for gas. The operator can add or remove money at will.
@@ -67,15 +75,21 @@ contract Lottery {
         Contract Functions
     */
 
-    constructor(address initialOperatorAddress) payable {
+    constructor(address initialOperatorAddress, uint initialTicketPrice, uint initialLotteryBlockDuration) payable {
         // When deploying this contract, initial funds should be paid to allow for smooth lottery operation.
-        isContractEnabled = true;
-        operatorAddress = initialOperatorAddress;
         addContractFunds(msg.value);
+
+        operatorAddress = initialOperatorAddress;
+        ticketPrice = initialTicketPrice; //1e16 // 0.01 ETH
+        lotteryBlockDuration = initialLotteryBlockDuration; //30 for testing, something larger for real.
+
+        startNewLottery();
     }
 
     receive() external payable {
         // If a player sends money, then give them tickets. If the operator sends money, then add it directly to the bonus prize pool.
+        lock_start();
+
         address sender = msg.sender;
         uint value = msg.value;
 
@@ -83,18 +97,14 @@ contract Lottery {
             addBonusPrizePool(value);
         }
         else {
-            requireContractEnabled();
+            requireLotteryActive();
+            requirePayableAddress(msg.sender);
+            requirePlayerAddress(msg.sender);
+
             buyTickets(sender, value);
         }
-    }
 
-    function fundContract(uint value) private {
-        addContractFunds(value);
-    }
-
-    function getContractBalance() private view returns (uint) {
-        // This is the true contract balance. This includes everything, including player funds.
-        return address(this).balance;
+        lock_end();
     }
 
     /*
@@ -103,8 +113,8 @@ contract Lottery {
 
     function buyTickets(address playerAddress, uint value) private {
         // Each ticket has a fixed cost. After spending all the funds on tickets, anything left over will be given back to the player.
-        uint numTickets = value / ticketPrice;
-        uint totalTicketValue = numTickets * ticketPrice;
+        uint numTickets = value / currentTicketPrice;
+        uint totalTicketValue = numTickets * currentTicketPrice;
 
         addPlayerPrizePool(totalTicketValue);
         value -= totalTicketValue;
@@ -122,10 +132,31 @@ contract Lottery {
         //sendToAddress(playerAddress, value);
     }
 
-    function endLottery() private {
+    function startNewLottery() private {
+        // Reset everything and begin a new lottery.
+        for(uint i = 0; i < currentTicketNumber; i++) {
+            delete map_ticket2Address[i];
+        }
+
+        for(uint i = 0; i < list_address.length; i++) {
+            delete map_address2NumTickets[list_address[i]];
+        }
+
+        delete list_address;
+
+        currentTicketNumber = 0;
+        playerPrizePool = 0;
+        bonusPrizePool = 0;
+
+        currentTicketPrice = ticketPrice;
+
+        lotteryBlockStart = block.number;
+    }
+
+    function endCurrentLottery() private {
         if(isZeroPlayerGame()) {
             // No one played.
-            emit LotteryEvent(block.number, address(0), 0);
+            emit LotteryEvent(lotteryBlockStart, address(0), 0);
         }
         else if(isOnePlayerGame()) {
             // Since only one person has played, just give them the entire prize.
@@ -133,11 +164,9 @@ contract Lottery {
 
             uint winnerPrize = bonusPrizePool + playerPrizePool;
 
-            resetLottery();
-            
             map_address2Winnings[winningAddress] += winnerPrize;
 
-            emit LotteryEvent(block.number, winningAddress, winnerPrize);
+            emit LotteryEvent(lotteryBlockStart, winningAddress, winnerPrize);
         }
         else {
             // Give the lottery operator their cut of the pot, and then give the rest to a randomly chosen winner.
@@ -147,12 +176,28 @@ contract Lottery {
             uint operatorPrize = playerPrizePool * operatorCut / 100;
             uint winnerPrize = playerPrizePool + bonusPrizePool - operatorPrize;
 
-            resetLottery();
-
             map_address2Winnings[getOperatorAddress()] += operatorPrize;
             map_address2Winnings[winningAddress] += winnerPrize;
 
-            emit LotteryEvent(block.number, winningAddress, winnerPrize);
+            emit LotteryEvent(lotteryBlockStart, winningAddress, winnerPrize);
+        }
+
+        startNewLottery();
+    }
+
+    function isLotteryActive() private view returns (bool) {
+        return block.number - lotteryBlockStart >= lotteryBlockDuration;
+    }
+
+    function requireLotteryActive() private view {
+        if(!isLotteryActive()) {
+            revert LotteryInactiveError();
+        }
+    }
+
+    function requireLotteryInactive() private view {
+        if(isLotteryActive()) {
+            revert LotteryActiveError();
         }
     }
 
@@ -184,20 +229,14 @@ contract Lottery {
         return winningTicket;
     }
 
-    function resetLottery() private {
-        for(uint i = 0; i < currentTicketNumber; i++) {
-            delete map_ticket2Address[i];
-        }
+    function setTicketPrice(uint newTicketPrice) private {
+        // Do not set the current ticket price here. When the next lottery starts, the current ticket price will be updated.
+        ticketPrice = newTicketPrice;
+    }
 
-        for(uint i = 0; i < list_address.length; i++) {
-            delete map_address2NumTickets[list_address[i]];
-        }
-
-        delete list_address;
-
-        currentTicketNumber = 0;
-        playerPrizePool = 0;
-        bonusPrizePool = 0;
+    function getTicketPrice() private view returns (uint) {
+        // Return the ticket current price.
+        return currentTicketPrice;
     }
 
     function withdrawWinnings(address playerAddress) private {
@@ -217,22 +256,8 @@ contract Lottery {
     }
 
     /*
-        Control Functions
+        Address Restriction Functions
     */
-
-    function setContractEnabled(bool isEnabled) private {
-        isContractEnabled = isEnabled;
-    }
-
-    function getContractEnabled() private view returns (bool) {
-        return isContractEnabled;
-    }
-
-    function requireContractEnabled() private view {
-        if(!getContractEnabled()) {
-            revert ContractDisabledError();
-        }
-    }
 
     function setOperatorAddress(address newOperatorAddress) private {
         operatorAddress = newOperatorAddress;
@@ -277,6 +302,15 @@ contract Lottery {
     /*
         Funding Functions
     */
+
+    function addContractBalance(uint value) private {
+        addContractFunds(value);
+    }
+
+    function getContractBalance() private view returns (uint) {
+        // This is the true contract balance. This includes everything, including player funds.
+        return address(this).balance;
+    }
 
     function addContractFunds(uint value) private {
         contractFunds += value;
@@ -385,22 +419,33 @@ contract Lottery {
         setLock(false);
     }
 
-    function action_fundContract() external payable {
+    function action_addContractBalance() external payable {
         // The operator can call this to give gas to the contract.
         lock_start();
 
         requireOperatorAddress(msg.sender);
 
-        fundContract(msg.value);
+        addContractBalance(msg.value);
+
+        lock_end();
+    }
+
+    function action_addBonusPrizePool() external payable {
+        // The operator can add funds to the bonus prize pool.
+        lock_start();
+
+        requireOperatorAddress(msg.sender);
+
+        addBonusPrizePool(msg.value);
 
         lock_end();
     }
 
     function action_buyTickets() external payable {
-        // Players can call this to buy tickets for the lottery.
+        // Players can call this to buy tickets for the lottery, but only if it is still active.
         lock_start();
 
-        requireContractEnabled();
+        requireLotteryActive();
         requirePayableAddress(msg.sender);
         requirePlayerAddress(msg.sender);
 
@@ -409,24 +454,13 @@ contract Lottery {
         lock_end();
     }
 
-    function action_endLottery() external {
-        // The operator can call this to end the lottery and distribute the prize to the winner.
+    function action_endCurrentLottery() external {
+        // Anyone can call this to end the current lottery, but only if it is no longer active.
         lock_start();
 
-        requireOperatorAddress(msg.sender);
+        requireLotteryInactive();
 
-        endLottery();
-
-        lock_end();
-    }
-
-    function action_setContractEnabled(bool isEnabled) external {
-        // The operator can call this to enable or disable the ability for players to enter the lottery.
-        lock_start();
-
-        requireOperatorAddress(msg.sender);
-
-        setContractEnabled(isEnabled);
+        endCurrentLottery();
 
         lock_end();
     }
@@ -460,6 +494,16 @@ contract Lottery {
         requireOperatorAddress(msg.sender);
 
         setOperatorAddress(newOperatorAddress);
+
+        lock_end();
+    }
+
+    function action_setTicketPrice(uint newTicketPrice) external {
+        lock_start();
+
+        requireOperatorAddress(msg.sender);
+
+        setTicketPrice(newTicketPrice);
 
         lock_end();
     }
@@ -505,8 +549,8 @@ contract Lottery {
         return totalAddressTickets(playerAddress) * N / totalTickets();
     }
 
-    function query_getContractEnabled() external view returns (bool) {
-        return getContractEnabled();
+    function query_isLotteryActive() external view returns (bool) {
+        return isLotteryActive();
     }
 
     function query_getOperatorAddress() external view returns (address) {
@@ -523,5 +567,9 @@ contract Lottery {
 
     function query_getBonusPrizePool() external view returns (uint) {
         return getBonusPrizePool();
+    }
+
+    function query_getTicketPrice() external view returns (uint) {
+        return getTicketPrice();
     }
 }
