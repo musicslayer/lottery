@@ -10,37 +10,42 @@ import "@openzeppelin/contracts/utils/Strings.sol";
  * @custom:dev-run-script ./scripts/deploy_with_ethers.ts
  */
 contract Lottery {
+    /// This contract is currently disabled.
+    error ContractDisabled();
+
+    /// The calling address is not the operator.
+    error NotOperator();
+
+    /// The calling address is not payable.
+    error NotPayable();
+
+    /// This contract does not have the funds requested.
+    error InsufficientFunds(uint contractBalance, uint requestedAmount);
+
     // Global switch to turn the lottery on and off.
-    bool isContractEnabled;
+    bool private isContractEnabled;
 
     // The operator owns this contract and is responsible for running the lottery. They must fund this contract with gas, and in return they will receive a cut of each prize.
-    //address payable constant operatorAddress = payable(0x1761DF124EC3bADb17Ef3B02167D068f3E542aC9);
-    address payable constant operatorAddress = payable(0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2);
-
-    // The zero address can never play since it has no owner. We just use it for cases where there are no valid players.
-    address payable constant zeroAddress = payable(0x0000000000000000000000000000000000000000);
+    address private constant operatorAddress = 0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2;
 
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     // Note that the player always receives the entire "bonusPrizePool" amount.
-    uint constant operatorCut = 10;
+    uint constant private operatorCut = 10;
 
     /* To ensure the safety of player money, the contract balance is accounted for by splitting it into three different places:
         // contractFunds - The money used to pay for gas. The operator can add or remove money at will.
         // playerPrizePool - The money players have paid to purchase tickets. The operator gets a cut of each prize automatically, but otherwise they cannot add or remove funds.
         // bonusPrizePool - The money that the operator has optionally added to "sweeten the pot" and provide more prize money. The operator can add funds but cannot remove them.
     */
-    uint contractFunds;
-    uint playerPrizePool;
-    uint bonusPrizePool;
+    uint private contractFunds;
+    uint private playerPrizePool;
+    uint private bonusPrizePool;
 
     // Variables to keep track of who is playing and how many tickets they have.
-    //mapping(address => bool) public map_isPlaying;
-    //address payable[] public list_playerAddress;
-
-    uint currentTicketNumber;
-    uint ticketPrice = 100000000;
-    mapping(uint => address payable) public map_ticket2Address;
-    mapping(address => uint) public map_address2NumTickets;
+    uint private currentTicketNumber;
+    uint private ticketPrice = 1e16; // 0.01 ETH
+    mapping(uint => address) private map_ticket2Address;
+    mapping(address => uint) private map_address2NumTickets;
 
     /*
         Standard Contract Functions
@@ -49,82 +54,100 @@ contract Lottery {
     constructor() payable {
         // When deploying this contract, initial funds should be paid to allow for smooth lottery operation.
         isContractEnabled = true;
+        addContractFunds(msg.value);
     }
 
     receive() external payable {
-        // If a player sends money, then give them tickets. If the operator sends money, then add it to the contract funds.
-        address payable sender = payable(msg.sender);
+        // If a player sends money, then give them tickets. If the operator sends money, then add it directly to the bonus prize pool.
+        address sender = msg.sender;
         uint value = msg.value;
 
-        if(sender == operatorAddress) {
-            contractFunds += value;
+        if(isOperatorAddress(sender)) {
+            addBonusPrizePool(value);
         }
         else {
             requireContractEnabled();
-
-            // Each ticket has a fixed cost. After spending all the funds on tickets, anything left over will be given back to the player.
-            uint numTickets = value / ticketPrice;
-            playerPrizePool += numTickets * ticketPrice;
-
-            map_address2NumTickets[sender] += numTickets;
-
-            for(uint i = 0; i < numTickets; i++) {
-                map_ticket2Address[currentTicketNumber++] = sender;
-            }
-
-            // TODO send leftover funds back.
-
-            //fundLottery() // Can we call this without paying again?
+            buyTickets(sender, value);
         }
+    }
+
+    function fundContract() external payable {
+        // The operator can call this to give gas to the contract.
+        requireOperator(msg.sender);
+        addContractFunds(msg.value);
     }
 
     /*
         Lottery Functions
     */
 
-    function chooseWinningAddress() public view returns (address payable) {
-        uint numPlayers = currentTicketNumber;
-        uint winningTicket;
+    function buyTickets(address playerAddress, uint value) private {
+        // Each ticket has a fixed cost. After spending all the funds on tickets, anything left over will be given back to the player.
+        uint numTickets = value / ticketPrice;
+        uint totalTicketValue = numTickets * ticketPrice;
 
-        // If less than 2 people are playing, deal with these cases manually.
-        if(numPlayers == 0) {
-            // There is no winner, so just return the zero address.
-            return zeroAddress;
-        }
-        else if(numPlayers == 1) {
-            // Don't bother generating a random number. It's a waste of gas and/or time in this case.
-            winningTicket = 0;
-        }
-        else {
-            // Randomly pick a winner from all the player addresses. Each address should have an equal chance of winning.
-            winningTicket = randomInt(numPlayers);
+        addPlayerPrizePool(totalTicketValue);
+        value -= totalTicketValue;
+
+        map_address2NumTickets[playerAddress] += numTickets;
+        for(uint i = 0; i < numTickets; i++) {
+            map_ticket2Address[currentTicketNumber++] = playerAddress;
         }
 
-        return map_ticket2Address[winningTicket];
+        sendToAddress(playerAddress, value);
     }
 
-    function endLottery() public {
-        address payable winningAddress = chooseWinningAddress();
-        if(winningAddress == zeroAddress) {
+    function endLottery() external {
+        address winningAddress;
+        uint numTickets = currentTicketNumber;
+
+        if(numTickets == 0) {
             // No one played, so just do nothing.
         }
-        else {
-            // Give the lottery operator their cut of the pot, and then give the rest to the winner.
-            uint operatorPrize = playerPrizePool * operatorCut / 100;
-            uint winnerPrize = bonusPrizePool + playerPrizePool - operatorPrize;
+        else if(isOnePlayer()) {
+            // Since only one person has played, just give them the entire prize.
+            winningAddress = map_ticket2Address[0];
+
+            uint winnerPrize = bonusPrizePool + playerPrizePool;
+
             playerPrizePool = 0;
             bonusPrizePool = 0;
-            operatorAddress.transfer(operatorPrize);
-            winningAddress.transfer(winnerPrize);
+            sendToAddress(winningAddress, winnerPrize);
         }
+        else {
+            // Give the lottery operator their cut of the pot, and then give the rest to a randomly chosen winner.
+            uint winningTicket = chooseWinningTicket(numTickets);
+            winningAddress = map_ticket2Address[winningTicket];
+            
+            uint operatorPrize = playerPrizePool * operatorCut / 100;
+            uint winnerPrize = playerPrizePool + bonusPrizePool - operatorPrize;
+
+            playerPrizePool = 0;
+            bonusPrizePool = 0;
+            sendToAddress(getOperatorAddress(), operatorPrize);
+            sendToAddress(winningAddress, winnerPrize);
+        }
+    }
+
+    function isOnePlayer() private view returns (bool) {
+        // Check to see if there is only one player who has purchased all the tickets.
+        // We assume there is at least one ticket.
+        address firstPlayer = map_ticket2Address[0];
+        return totalAddressTickets(firstPlayer) == totalTickets();
+    }
+
+    function chooseWinningTicket(uint numTickets) private view returns (uint) {
+        // This should only be called if at least two different players have purchased tickets.
+        uint winningTicket = randomInt(numTickets);
+        return winningTicket;
     }
 
     /*
         RNG Functions
     */
 
-    function randomInt(uint N) public view returns (uint) {
-        // Generate a random integer 0 <= n < L.
+    function randomInt(uint N) private view returns (uint) {
+        // Generate a random integer 0 <= n < N.
         uint randomHash = uint(keccak256(abi.encodePacked(block.difficulty, block.timestamp)));
         return randomHash % N;
     }
@@ -133,18 +156,38 @@ contract Lottery {
         Control Functions
     */
 
-    function enableContract() public {
+    function getContractEnabled() public view returns (bool) {
+        return isContractEnabled;
+    }
+
+    function enableContract() external {
         // Enable the ability for players to enter the lottery.
         isContractEnabled = true;
     }
 
-    function disableContract() public {
+    function disableContract() external {
         // Disable the ability for players to enter the lottery.
         isContractEnabled = false;
     }
 
-    function requireContractEnabled() public view {
-        require(isContractEnabled, "This contract is currently disabled.");
+    function requireContractEnabled() view private {
+        if(!getContractEnabled()) {
+            revert ContractDisabled();
+        }
+    }
+
+    function getOperatorAddress() public pure returns (address) {
+        return operatorAddress;
+    }
+
+    function isOperatorAddress(address sender) public pure returns (bool) {
+        return sender == getOperatorAddress();
+    }
+
+    function requireOperator(address sender) pure private {
+        if(!isOperatorAddress(sender)) {
+            revert NotOperator();
+        }
     }
 
     /*
@@ -155,10 +198,8 @@ contract Lottery {
         return contractFunds;
     }
 
-    function addContractFunds() external payable {
-        // Directly fund the contract. This does not add to the prize or enter any addresses into the lottery.
-        // This should only be called by the lottery operator to give the contract gas.
-        contractFunds += msg.value;
+    function addContractFunds(uint value) public {
+        contractFunds += value;
     }
 
     function getContractBalance() public view returns (uint) {
@@ -185,53 +226,51 @@ contract Lottery {
     function removeContractFunds(uint amount) public {
         // Transfer an amount from the contract balance to the operator.
         uint operatorContractBalance = getOperatorContractBalance();
-        require(amount <= operatorContractBalance, string.concat("The amount ", Strings.toString(amount), " is greater than the contract balance ", Strings.toString(operatorContractBalance)));
 
-        // Any extra funds should be taken into account first, then subtract from "contractFunds".
-        contractFunds -= (amount - getExtraContractBalance());
-        operatorAddress.transfer(amount);
+        if(amount > operatorContractBalance) {
+            revert InsufficientFunds(operatorContractBalance, amount);
+        }
+
+        // If the amount is higher than the extra funds, subtract the difference from "contractFunds". This accounting makes it so extra funds are spent first.
+        if(amount > getExtraContractBalance()) {
+            contractFunds -= (amount - getExtraContractBalance());
+        }
+        sendToAddress(getOperatorAddress(), amount);
     }
 
     function removeAllContractFunds() public {
         // Transfer the entire contract balance to the operator.
         contractFunds = 0;
-        operatorAddress.transfer(getOperatorContractBalance());
+        sendToAddress(getOperatorAddress(), getOperatorContractBalance());
     }
 
-    function getPlayerPrizePool() external view returns (uint) {
+    function getPlayerPrizePool() public view returns (uint) {
         return playerPrizePool;
     }
 
-/*
-    function fundLottery() external payable {
-        // When addresses pay the contract, they are entered into the lottery.
-        // If they sent too much, return the excess amount.
-        // If they have already entered the lottery, error so the transfer can be reverted.
-        requireContractEnabled();
-
-        playerPrizePool += msg.value;
-        registerAddress(payable(msg.sender));
+    function addPlayerPrizePool(uint value) public {
+        // Add funds to the bonus prize pool.
+        bonusPrizePool += value;
     }
-*/
 
-    function getBonusPrizePool() external view returns (uint) {
+    function getBonusPrizePool() public view returns (uint) {
         return bonusPrizePool;
     }
 
-    function addBonusPrizePool() external payable {
+    function addBonusPrizePool(uint value) public {
         // Add funds to the bonus prize pool.
-        bonusPrizePool += msg.value;
+        bonusPrizePool += value;
     }
 
     /*
         Query Functions
     */
 
-    function isAddressPlaying(address payable playerAddress) public view returns (bool) {
+    function isAddressPlaying(address playerAddress) public view returns (bool) {
         return map_address2NumTickets[playerAddress] > 0;
     }
 
-    function totalAddressTickets(address payable playerAddress) public view returns (uint) {
+    function totalAddressTickets(address playerAddress) public view returns (uint) {
         return map_address2NumTickets[playerAddress];
     }
 
@@ -239,7 +278,7 @@ contract Lottery {
         return currentTicketNumber;
     }
 
-    function addressWinChanceString(address payable playerAddress) public view returns (string memory) {
+    function addressWinChanceString(address playerAddress) public view returns (string memory) {
         // Returns the probability that this address will win as a truncated decimal between 0 and 100.
         // Since solidity only supports integers, we must use extra steps to present a decimal.
         if(totalTickets() == 0) {
@@ -260,30 +299,19 @@ contract Lottery {
         Utility Functions
     */
 
-    /*
-    function toString(address account) public pure returns(string memory) {
-        return toString(abi.encodePacked(account));
+    function sendToAddress(address recipientAddress, uint value) private {
+        // The caller is responsible for making sure that the address is actually payable.
+        payable(recipientAddress).transfer(value);
     }
 
-    function toString(uint256 value) public pure returns(string memory) {
-        return toString(abi.encodePacked(value));
+    function isPayableAddress(address testAddress) private returns (bool) {
+        // If the address is payable, this transfer should succeed.
+        return payable(testAddress).send(0);
     }
 
-    function toString(bytes32 value) public pure returns(string memory) {
-        return toString(abi.encodePacked(value));
-    }
-
-    function toString(bytes memory data) public pure returns(string memory) {
-        bytes memory alphabet = "0123456789abcdef";
-
-        bytes memory str = new bytes(2 + data.length * 2);
-        str[0] = "0";
-        str[1] = "x";
-        for (uint i = 0; i < data.length; i++) {
-            str[2+i*2] = alphabet[uint(uint8(data[i] >> 4))];
-            str[3+i*2] = alphabet[uint(uint8(data[i] & 0x0f))];
+    function requirePayableAddress(address testAddress) private {
+        if(isPayableAddress(testAddress)) {
+            revert NotPayable();
         }
-        return string(str);
     }
-    */
 }

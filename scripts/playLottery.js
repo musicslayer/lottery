@@ -1,8 +1,9 @@
 const { ethers } = require("hardhat");
 
+
 function handleError(err) {
     console.log('ERROR:');
-    console.log(JSON.stringify(err, ["message", "arguments", "type", "name"]));
+    console.log(JSON.stringify(err, Object.getOwnPropertyNames(err), 4));
 }
 
 async function deployContract(startingBalance) {
@@ -54,9 +55,35 @@ async function endLottery(lotteryContract) {
     return call_endLottery;
 }
 
+async function getContractEnabled(lotteryContract) {
+    const call_getContractEnabled = await lotteryContract.getContractEnabled();
+    return call_getContractEnabled;
+}
+
+async function enableContract(lotteryContract) {
+    const call_enableContract = await lotteryContract.enableContract();
+    return call_enableContract.wait();
+}
+
+async function disableContract(lotteryContract) {
+    const call_disableContract = await lotteryContract.disableContract();
+    return call_disableContract.wait();
+}
+
+async function requireContractEnabled(lotteryContract) {
+    const call_requireContractEnabled = await lotteryContract.requireContractEnabled();
+    return call_requireContractEnabled.wait();
+}
+
 async function getBalance(lotteryContract) {
     const call_getBalance = await lotteryContract.getBalance();
     return call_getBalance;
+}
+
+async function removeContractFunds(lotteryContract) {
+    //const call_removeContractFunds = await lotteryContract.removeContractFunds(ethers.utils.parseEther(amount));
+    const call_removeContractFunds = await lotteryContract.foo();
+    await call_removeContractFunds.wait();
 }
 
 async function async_playLotteryDebug() {
@@ -88,6 +115,7 @@ async function async_playLotteryDebug() {
     console.log('Winner: ' + await chooseWinner(lotteryContract));
 }
 
+/*
 async function async_playLottery() {
     // Deploy contract and then use address to access contract object.
     let lotteryAddress = await deployContract("0.000001");
@@ -111,6 +139,32 @@ async function async_playLottery() {
     await endLottery(lotteryContract);
 
     console.log('Balance After: ' + await getBalance(lotteryContract));
+}
+*/
+
+/*
+async function async_playLottery() {
+    // Deploy contract and then use address to access contract object.
+    let lotteryAddress = await deployContract("0.000001");
+    const lotteryContract = await ethers.getContractAt("Lottery", lotteryAddress);
+
+    console.log('enabled? ' + await getContractEnabled(lotteryContract));
+    await disableContract(lotteryContract);
+    console.log('enabled? ' + await getContractEnabled(lotteryContract));
+    await requireContractEnabled(lotteryContract);
+}
+*/
+
+async function async_playLottery() {
+    // Deploy contract and then use address to access contract object.
+    let lotteryAddress = await deployContract("0.00000000000001");
+    const lotteryContract = await ethers.getContractAt("Lottery", lotteryAddress);
+
+    console.log('X');
+    //const call_foo = await lotteryContract.removeContractFunds(50000000000);
+    const call_foo = await lotteryContract.removeContractFunds(5000);
+    await call_foo.wait();
+    console.log('Y');
 }
 
 async_playLottery().catch(handleError);
