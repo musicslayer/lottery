@@ -204,7 +204,7 @@ contract Lottery {
     }
 
     function isLotteryActive() private view returns (bool) {
-        return block.number - lotteryBlockStart >= lotteryBlockDuration;
+        return block.number - lotteryBlockStart <= lotteryBlockDuration;
     }
 
     function requireLotteryActive() private view {

@@ -6,13 +6,14 @@ function handleError(err) {
     console.log(JSON.stringify(err, Object.getOwnPropertyNames(err), 4));
 }
 
-async function deployContract(startingBalance) {
+async function deployContract(startingBalance, args) {
     // Create factory that will deploy the contract.
     const lotteryFactory = await ethers.getContractFactory("Lottery");
 
     // Deploy the contract to a random address.
     //const lotteryContract = await lotteryFactory.deploy("0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2", { value: ethers.utils.parseEther(startingBalance) });
-    const lotteryContract = await lotteryFactory.deploy(10000000000, 5, { value: ethers.utils.parseEther(startingBalance) });
+    //const lotteryContract = await lotteryFactory.deploy(10000000000, 5, { value: ethers.utils.parseEther(startingBalance) });
+    const lotteryContract = await lotteryFactory.deploy(...args, { value: startingBalance });
     await lotteryContract.deployed();
 
     // Access address.
@@ -183,7 +184,7 @@ async function async_playLottery() {
 
 async function async_playLottery() {
     // Deploy contract and then use address to access contract object.
-    let lotteryAddress = await deployContract("0.00000000000001");
+    let lotteryAddress = await deployContract(ethers.utils.parseEther("0.00000000000001"), [ethers.utils.parseEther("0.01"), 5]);
     const lotteryContract = await ethers.getContractAt("Lottery", lotteryAddress);
 
     const nonExistentFuncSignature = 'nonExistentFunction(uint256,uint256)';
