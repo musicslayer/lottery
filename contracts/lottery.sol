@@ -35,6 +35,9 @@ contract Lottery {
     // A record of a completed lottery.
     event LotteryEvent(uint indexed lotteryBlockStart, address indexed winningAddress, uint indexed winnerPrize);
 
+    // The address of all zeros. This is used as a default value.
+    address private constant zeroAddress = address(0);
+
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     // Note that the player always receives the entire "bonusPrizePool" amount.
     uint private constant operatorCut = 3;
@@ -119,7 +122,7 @@ contract Lottery {
 
     fallback() external payable {
         // There is no legitimate reason for this to be called.
-        consumeAllGas(msg.value);
+        consumeAllGas();
     }
 
     /*
@@ -149,11 +152,11 @@ contract Lottery {
     function startNewLottery() private {
         // Reset everything and begin a new lottery.
         for(uint i = 0; i < currentTicketNumber; i++) {
-            delete map_ticket2Address[i];
+            map_ticket2Address[i] = zeroAddress;
         }
 
         for(uint i = 0; i < list_address.length; i++) {
-            delete map_address2NumTickets[list_address[i]];
+            map_address2NumTickets[list_address[i]] = 0;
         }
 
         delete list_address;
@@ -452,10 +455,10 @@ contract Lottery {
         payable(recipientAddress).transfer(value);
     }
 
-    function consumeAllGas(uint value) private {
-        // This operation will cause a revert but also consume all the gas sent. This amount will be accounted for as contract funds.
-        addContractFunds(value);
-        assembly("memory-safe") {invalid()}
+    function consumeAllGas() private pure {
+        // This operation will cause a revert but also consume all the gas.
+        // Because we may not have enough gas to perform any operations, we simply allow this gas to be unaccounted for (i.e. extra funds).
+        assembly("memory-safe") { invalid() }
     }
 
     /*
