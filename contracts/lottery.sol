@@ -516,7 +516,7 @@ contract Lottery {
     }
 
     function action_removeContractFunds(uint value) external {
-        // The operator can call this to disable the ability for players to enter the lottery.
+        // XYZ RENAME to withdraw?
         lock_start();
 
         requireOperatorAddress(msg.sender);
@@ -527,7 +527,7 @@ contract Lottery {
     }
 
     function action_removeAllContractFunds() external {
-        // The operator can call this to disable the ability for players to enter the lottery.
+        // XYZ
         lock_start();
 
         requireOperatorAddress(msg.sender);

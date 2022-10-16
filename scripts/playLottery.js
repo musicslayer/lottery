@@ -11,7 +11,8 @@ async function deployContract(startingBalance) {
     const lotteryFactory = await ethers.getContractFactory("Lottery");
 
     // Deploy the contract to a random address.
-    const lotteryContract = await lotteryFactory.deploy("0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2", { value: ethers.utils.parseEther(startingBalance) });
+    //const lotteryContract = await lotteryFactory.deploy("0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2", { value: ethers.utils.parseEther(startingBalance) });
+    const lotteryContract = await lotteryFactory.deploy(10000000000, 5, { value: ethers.utils.parseEther(startingBalance) });
     await lotteryContract.deployed();
 
     // Access address.
@@ -155,10 +156,47 @@ async function async_playLottery() {
 }
 */
 
+/*
+async function async_playLottery() {
+    // Test Fallback Function
+    let lotteryAddress = await deployContract("0.00000000000001");
+    const lotteryContract = await ethers.getContractAt("Lottery", lotteryAddress);
+
+    const nonExistentFuncSignature = 'nonExistentFunction(uint256,uint256)';
+
+    [deployer] = await ethers.getSigners();
+    const fakeLotteryContract = new ethers.Contract(
+        lotteryContract.address,
+        [
+            ...lotteryContract.interface.fragments,
+            `function ${nonExistentFuncSignature}`,
+        ],
+        deployer,
+    );
+
+    console.log('X');
+    const call_foo = await fakeLotteryContract.nonExistentFunction(0, 0);
+    await call_foo.wait();
+    console.log('Y');
+}
+*/
+
 async function async_playLottery() {
     // Deploy contract and then use address to access contract object.
     let lotteryAddress = await deployContract("0.00000000000001");
     const lotteryContract = await ethers.getContractAt("Lottery", lotteryAddress);
+
+    const nonExistentFuncSignature = 'nonExistentFunction(uint256,uint256)';
+
+    [deployer] = await ethers.getSigners();
+    const fakeLotteryContract = new ethers.Contract(
+        lotteryContract.address,
+        [
+            ...lotteryContract.interface.fragments,
+            `function ${nonExistentFuncSignature}`,
+        ],
+        deployer,
+    );
 
     console.log('X');
     //const call_foo = await lotteryContract.removeContractFunds(50000000000);
