@@ -20,6 +20,9 @@ contract Lottery {
     /// The calling address is not the operator.
     error NotOperatorError();
 
+    /// The calling address is not the contract owner.
+    error NotOwnerError();
+
     /// The calling address is not an eligible player.
     error NotPlayerError();
 
@@ -43,8 +46,13 @@ contract Lottery {
     uint private lotteryBlockStart;
 
     // The number of additional blocks after the starting block where players may purchase tickets.
-    // After this duration, anyone may end the lottery to distribute prizes and start a new lottery.
+    // After this duration, buying tickets is not allowed and anyone may end the lottery to distribute prizes and start a new lottery.
+    // If the duration is changed, the new duration will only apply to future lotteries, not the current one.
     uint private lotteryBlockDuration;
+    uint private currentLotteryBlockDuration;
+
+    // The owner is the original operator and is able to assign themselves the operator role at any time.
+    address private ownerAddress;
 
     // The operator is responsible for running the lottery. They must fund this contract with gas, and in return they will receive a cut of each prize.
     address private operatorAddress;
@@ -75,26 +83,28 @@ contract Lottery {
         Contract Functions
     */
 
-    constructor(address initialOperatorAddress, uint initialTicketPrice, uint initialLotteryBlockDuration) payable {
+    constructor(uint initialTicketPrice, uint initialLotteryBlockDuration) payable {
         // When deploying this contract, initial funds should be paid to allow for smooth lottery operation.
         addContractFunds(msg.value);
 
-        operatorAddress = initialOperatorAddress;
-        ticketPrice = initialTicketPrice; //1e16 // 0.01 ETH
+        ownerAddress = msg.sender;
+        operatorAddress = msg.sender;
+
         lotteryBlockDuration = initialLotteryBlockDuration; //30 for testing, something larger for real.
+        ticketPrice = initialTicketPrice; //1e16 // 0.01 ETH
 
         startNewLottery();
     }
 
     receive() external payable {
-        // If a player sends money, then give them tickets. If the operator sends money, then add it directly to the bonus prize pool.
+        // Funds received from a player will be used to buy tickets. Funds received from the operator will be used to fund the contract.
         lock_start();
 
         address sender = msg.sender;
         uint value = msg.value;
 
         if(isOperatorAddress(sender)) {
-            addBonusPrizePool(value);
+            addContractFunds(value);
         }
         else {
             requireLotteryActive();
@@ -107,17 +117,24 @@ contract Lottery {
         lock_end();
     }
 
+    fallback() external payable {
+        // There is no legitimate reason for this to be called.
+        consumeAllGas(msg.value);
+    }
+
     /*
         Lottery Functions
     */
 
     function buyTickets(address playerAddress, uint value) private {
-        // Each ticket has a fixed cost. After spending all the funds on tickets, anything left over will be given back to the player.
+        // Purchase as many tickets as possible for the address with the provided value. Note that tickets can only be purchased in whole number quantities.
+        // After spending all the funds on tickets, anything left over will be added to the address's winnings balance that they can withdraw.
+        addPlayerPrizePool(value);
+
         uint numTickets = value / currentTicketPrice;
         uint totalTicketValue = numTickets * currentTicketPrice;
 
-        addPlayerPrizePool(totalTicketValue);
-        value -= totalTicketValue;
+        map_address2Winnings[playerAddress] += value - totalTicketValue;
 
         if(!isAddressPlaying(playerAddress)) {
             list_address.push(playerAddress);
@@ -127,9 +144,6 @@ contract Lottery {
         for(uint i = 0; i < numTickets; i++) {
             map_ticket2Address[currentTicketNumber++] = playerAddress;
         }
-
-        // ??? Should we just take the extra ???
-        //sendToAddress(playerAddress, value);
     }
 
     function startNewLottery() private {
@@ -148,6 +162,7 @@ contract Lottery {
         playerPrizePool = 0;
         bonusPrizePool = 0;
 
+        currentLotteryBlockDuration = lotteryBlockDuration;
         currentTicketPrice = ticketPrice;
 
         lotteryBlockStart = block.number;
@@ -229,20 +244,34 @@ contract Lottery {
         return winningTicket;
     }
 
+    function setLotteryBlockDuration(uint newLotteryBlockDuration) private {
+        // Do not set the current lottery block duration here. When the next lottery starts, the current lottery block duration will be updated.
+        lotteryBlockDuration = newLotteryBlockDuration;
+    }
+
+    function getLotteryBlockDuration() private view returns (uint) {
+        // Return the current lottery block duration.
+        return currentLotteryBlockDuration;
+    }
+
     function setTicketPrice(uint newTicketPrice) private {
         // Do not set the current ticket price here. When the next lottery starts, the current ticket price will be updated.
         ticketPrice = newTicketPrice;
     }
 
     function getTicketPrice() private view returns (uint) {
-        // Return the ticket current price.
+        // Return the current ticket price.
         return currentTicketPrice;
     }
 
-    function withdrawWinnings(address playerAddress) private {
+    function withdrawAddressWinnings(address playerAddress) private {
         uint winnings = map_address2Winnings[playerAddress];
         map_address2Winnings[playerAddress] = 0;
         transferToAddress(playerAddress, winnings);
+    }
+
+    function getAddressWinnings(address playerAddress) private view returns (uint) {
+        return map_address2Winnings[playerAddress];
     }
 
     /*
@@ -258,6 +287,24 @@ contract Lottery {
     /*
         Address Restriction Functions
     */
+
+    function setOwnerAddress(address newOwnerAddress) private {
+        ownerAddress = newOwnerAddress;
+    }
+
+    function getOwnerAddress() private view returns (address) {
+        return ownerAddress;
+    }
+
+    function isOwnerAddress(address sender) private view returns (bool) {
+        return sender == getOwnerAddress();
+    }
+
+    function requireOwnerAddress(address sender) private view {
+        if(!isOwnerAddress(sender)) {
+            revert NotOwnerError();
+        }
+    }
 
     function setOperatorAddress(address newOperatorAddress) private {
         operatorAddress = newOperatorAddress;
@@ -302,10 +349,6 @@ contract Lottery {
     /*
         Funding Functions
     */
-
-    function addContractBalance(uint value) private {
-        addContractFunds(value);
-    }
 
     function getContractBalance() private view returns (uint) {
         // This is the true contract balance. This includes everything, including player funds.
@@ -409,6 +452,12 @@ contract Lottery {
         payable(recipientAddress).transfer(value);
     }
 
+    function consumeAllGas(uint value) private {
+        // This operation will cause a revert but also consume all the gas sent. This amount will be accounted for as contract funds.
+        addContractFunds(value);
+        assembly("memory-safe") {invalid()}
+    }
+
     /*
         External Functions
     */
@@ -419,22 +468,20 @@ contract Lottery {
         setLock(false);
     }
 
-    function action_addContractBalance() external payable {
+    function action_addContractFunds() external payable {
         // The operator can call this to give gas to the contract.
         lock_start();
 
         requireOperatorAddress(msg.sender);
 
-        addContractBalance(msg.value);
+        addContractFunds(msg.value);
 
         lock_end();
     }
 
     function action_addBonusPrizePool() external payable {
-        // The operator can add funds to the bonus prize pool.
+        // Anyone can add funds to the bonus prize pool.
         lock_start();
-
-        requireOperatorAddress(msg.sender);
 
         addBonusPrizePool(msg.value);
 
@@ -487,6 +534,17 @@ contract Lottery {
         lock_end();
     }
 
+    function action_setOwnerAddress(address newOwnerAddress) external {
+        // The current owner can transfer ownership to a new address.
+        lock_start();
+
+        requireOwnerAddress(msg.sender);
+
+        setOwnerAddress(newOwnerAddress);
+
+        lock_end();
+    }
+
     function action_setOperatorAddress(address newOperatorAddress) external {
         // The current operator can assign the operator role to a new address.
         lock_start();
@@ -494,6 +552,27 @@ contract Lottery {
         requireOperatorAddress(msg.sender);
 
         setOperatorAddress(newOperatorAddress);
+
+        lock_end();
+    }
+
+    function action_setOperatorAddressToOwner() external {
+        // The owner can call this to make themselves the operator.
+        lock_start();
+
+        requireOwnerAddress(msg.sender);
+
+        setOperatorAddress(msg.sender);
+
+        lock_end();
+    }
+
+    function action_setLotteryBlockDuration(uint newLotteryBlockDuration) external {
+        lock_start();
+
+        requireOperatorAddress(msg.sender);
+
+        setLotteryBlockDuration(newLotteryBlockDuration);
 
         lock_end();
     }
@@ -508,11 +587,22 @@ contract Lottery {
         lock_end();
     }
 
-    function action_withdrawWinnings(address playerAddress) external {
-        // Both players and the operator can manually transfer their winnings to their address.
+    function action_withdrawAddressWinnings() external {
+        // Anyone can manually transfer their winnings to their address.
         lock_start();
 
-        withdrawWinnings(playerAddress);
+        withdrawAddressWinnings(msg.sender);
+
+        lock_end();
+    }
+
+    function action_withdrawOtherAddressWinnings(address playerAddress) external {
+        // The operator can trigger a withdraw for someone else.
+        lock_start();
+
+        requireOperatorAddress(msg.sender);
+
+        withdrawAddressWinnings(playerAddress);
 
         lock_end();
     }
@@ -531,6 +621,10 @@ contract Lottery {
 
     function query_totalTickets() external view returns (uint) {
         return totalTickets();
+    }
+
+    function query_getAddressWinnings(address playerAddress) external view returns (uint) {
+        return getAddressWinnings(playerAddress);
     }
 
     function query_isAddressPlaying(address playerAddress) external view returns (bool) {
@@ -553,6 +647,10 @@ contract Lottery {
         return isLotteryActive();
     }
 
+    function query_getOwnerAddress() external view returns (address) {
+        return getOwnerAddress();
+    }
+
     function query_getOperatorAddress() external view returns (address) {
         return getOperatorAddress();
     }
@@ -567,6 +665,10 @@ contract Lottery {
 
     function query_getBonusPrizePool() external view returns (uint) {
         return getBonusPrizePool();
+    }
+
+    function query_getLotteryBlockDuration() external view returns (uint) {
+        return getLotteryBlockDuration();
     }
 
     function query_getTicketPrice() external view returns (uint) {
