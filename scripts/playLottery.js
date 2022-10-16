@@ -187,18 +187,6 @@ async function async_playLottery() {
     let lotteryAddress = await deployContract(ethers.utils.parseEther("0.00000000000001"), [5, ethers.utils.parseEther("0.01")]);
     const lotteryContract = await ethers.getContractAt("Lottery", lotteryAddress);
 
-    const nonExistentFuncSignature = 'nonExistentFunction(uint256,uint256)';
-
-    [deployer] = await ethers.getSigners();
-    const fakeLotteryContract = new ethers.Contract(
-        lotteryContract.address,
-        [
-            ...lotteryContract.interface.fragments,
-            `function ${nonExistentFuncSignature}`,
-        ],
-        deployer,
-    );
-
     console.log('X');
     //const call_foo = await lotteryContract.removeContractFunds(50000000000);
     const call_foo = await lotteryContract.removeContractFunds(5000);

@@ -23,6 +23,9 @@ contract Lottery {
     /// The calling address is not the contract owner.
     error NotOwnerError();
 
+    /// The calling address is not the contract owner or the operator.
+    error NotOwnerOrOperatorError();
+
     /// The calling address is not an eligible player.
     error NotPlayerError();
 
@@ -43,9 +46,6 @@ contract Lottery {
 
     // A record of a lottery ending.
     event LotteryEnd(uint indexed lotteryBlockStart, uint indexed lotteryBlockEnd, address indexed winningAddress, uint winnerPrize);
-
-    // The address of all zeros. This is used as a default value.
-    address private constant zeroAddress = address(0);
 
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     // Note that the player always receives the entire "bonusPrizePool" amount.
@@ -73,14 +73,16 @@ contract Lottery {
     uint private ticketPrice;
     uint private currentTicketPrice;
 
-    /* To ensure the safety of player money, the contract balance is accounted for by splitting it into three different places:
+    /* To ensure the safety of player money, the contract balance is accounted for by splitting it into different places:
         // contractFunds - The money used to pay for gas. The operator can add or withdraw money at will.
         // playerPrizePool - The money players have paid to purchase tickets. The operator gets a cut of each prize automatically, but otherwise they cannot add or withdraw funds.
         // bonusPrizePool - The money that the operator has optionally added to "sweeten the pot" and provide more prize money. The operator can add funds but cannot withdraw them.
+        // claimableBalancePool - The money that has not yet been claimed.
     */
     uint private contractFunds;
     uint private playerPrizePool;
     uint private bonusPrizePool;
+    uint private claimableBalancePool;
 
     // Variables to keep track of who is playing and how many tickets they have.
     uint private currentTicketNumber;
@@ -143,8 +145,10 @@ contract Lottery {
 
         uint numTickets = value / currentTicketPrice;
         uint totalTicketValue = numTickets * currentTicketPrice;
+        uint unspentValue = value - totalTicketValue;
 
-        map_address2ClaimableBalance[playerAddress] += value - totalTicketValue;
+        map_address2ClaimableBalance[playerAddress] += unspentValue;
+        claimableBalancePool += unspentValue;
 
         map_address2NumTickets[playerAddress] += numTickets;
         for(uint i = 0; i < numTickets; i++) {
@@ -190,6 +194,7 @@ contract Lottery {
             uint winnerPrize = bonusPrizePool + playerPrizePool;
 
             map_address2ClaimableBalance[winningAddress] += winnerPrize;
+            claimableBalancePool += winnerPrize;
 
             emit LotteryEnd(lotteryBlockStart, block.number, winningAddress, winnerPrize);
         }
@@ -203,6 +208,7 @@ contract Lottery {
 
             map_address2ClaimableBalance[getOperatorAddress()] += operatorPrize;
             map_address2ClaimableBalance[winningAddress] += winnerPrize;
+            claimableBalancePool += operatorPrize + winnerPrize;
 
             emit LotteryEnd(lotteryBlockStart, block.number, winningAddress, winnerPrize);
         }
@@ -279,7 +285,10 @@ contract Lottery {
     function withdrawAddressClaimableBalance(address playerAddress) private {
         // We only allow the entire balance to be claimed.
         uint balance = map_address2ClaimableBalance[playerAddress];
+
         map_address2ClaimableBalance[playerAddress] = 0;
+        claimableBalancePool -= balance;
+
         transferToAddress(playerAddress, balance);
     }
 
@@ -336,6 +345,16 @@ contract Lottery {
     function requireOperatorAddress(address sender) private view {
         if(!isOperatorAddress(sender)) {
             revert NotOperatorError();
+        }
+    }
+
+    function isOwnerOrOperatorAddress(address sender) private view returns (bool) {
+        return isOwnerAddress(sender) || isOperatorAddress(sender);
+    }
+
+    function requireOwnerOrOperatorAddress(address sender) private view {
+        if(!isOwnerOrOperatorAddress(sender)) {
+            revert NotOwnerOrOperatorError();
         }
     }
 
@@ -418,7 +437,7 @@ contract Lottery {
     }
 
     function getAccountedContractBalance() private view returns (uint) {
-        return contractFunds + playerPrizePool + bonusPrizePool;
+        return contractFunds + playerPrizePool + bonusPrizePool + claimableBalancePool;
     }
 
     function getExtraContractBalance() private view returns (uint) {
@@ -685,5 +704,41 @@ contract Lottery {
 
     function query_getTicketPrice() external view returns (uint) {
         return getTicketPrice();
+    }
+
+    error InternalInfo(
+        uint lotteryBlockStart,
+        uint lotteryBlockDuration,
+        uint currentLotteryBlockDuration,
+        address ownerAddress,
+        address operatorAddress,
+        uint ticketPrice,
+        uint currentTicketPrice,
+        uint contractFunds,
+        uint playerPrizePool,
+        uint bonusPrizePool,
+        uint claimableBalancePool,
+        uint currentTicketNumber
+    );
+
+    function query_getInternalInfo() external view {
+        // The owner or the operator can call this to get information about the internal state of the contract.
+        // Note that we use an error as it is the easiest way to aggregate and reveal all the information we want.
+        requireOwnerOrOperatorAddress(msg.sender);
+
+        revert InternalInfo(
+            lotteryBlockStart,
+            lotteryBlockDuration,
+            currentLotteryBlockDuration,
+            ownerAddress,
+            operatorAddress,
+            ticketPrice,
+            currentTicketPrice,
+            contractFunds,
+            playerPrizePool,
+            bonusPrizePool,
+            claimableBalancePool,
+            currentTicketNumber
+        );
     }
 }
