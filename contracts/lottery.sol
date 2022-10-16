@@ -75,7 +75,6 @@ contract Lottery {
 
     // Variables to keep track of who is playing and how many tickets they have.
     uint private currentTicketNumber;
-    address[] private list_address;
     mapping(uint => address) private map_ticket2Address;
     mapping(address => uint) private map_address2NumTickets;
 
@@ -139,10 +138,6 @@ contract Lottery {
 
         map_address2Winnings[playerAddress] += value - totalTicketValue;
 
-        if(!isAddressPlaying(playerAddress)) {
-            list_address.push(playerAddress);
-        }
-
         map_address2NumTickets[playerAddress] += numTickets;
         for(uint i = 0; i < numTickets; i++) {
             map_ticket2Address[currentTicketNumber++] = playerAddress;
@@ -150,21 +145,23 @@ contract Lottery {
     }
 
     function startNewLottery() private {
-        // Reset everything and begin a new lottery.
+        // Reset lottery state and begin a new lottery.
         for(uint i = 0; i < currentTicketNumber; i++) {
-            map_ticket2Address[i] = zeroAddress;
-        }
+            address playerAddress = map_ticket2Address[i];
 
-        for(uint i = 0; i < list_address.length; i++) {
-            map_address2NumTickets[list_address[i]] = 0;
+            // To save gas, don't call delete if we don't have to.
+            if(map_address2NumTickets[playerAddress] != 0) {
+                delete(map_address2NumTickets[playerAddress]);
+            }
+            
+            // We don't need to clear "map_ticket2Address" here. When we run the next lottery, any remaining data will either be overwritten or unused.
         }
-
-        delete list_address;
 
         currentTicketNumber = 0;
         playerPrizePool = 0;
         bonusPrizePool = 0;
 
+        // If any of these values have been changed by the operator, update them now before starting the next lottery.
         currentLotteryBlockDuration = lotteryBlockDuration;
         currentTicketPrice = ticketPrice;
 
@@ -234,7 +231,9 @@ contract Lottery {
 
     function isOnePlayerGame() private view returns (bool) {
         // Check to see if there is only one player who has purchased all the tickets.
-        return list_address.length == 1;
+        // We assume there is at least one ticket.
+        address firstPlayer = map_ticket2Address[0];
+        return totalAddressTickets(firstPlayer) == totalTickets();
     }
 
     function isAddressPlaying(address playerAddress) private view returns (bool) {
