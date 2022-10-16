@@ -184,7 +184,7 @@ async function async_playLottery() {
 
 async function async_playLottery() {
     // Deploy contract and then use address to access contract object.
-    let lotteryAddress = await deployContract(ethers.utils.parseEther("0.00000000000001"), [ethers.utils.parseEther("0.01"), 5]);
+    let lotteryAddress = await deployContract(ethers.utils.parseEther("0.00000000000001"), [5, ethers.utils.parseEther("0.01")]);
     const lotteryContract = await ethers.getContractAt("Lottery", lotteryAddress);
 
     const nonExistentFuncSignature = 'nonExistentFunction(uint256,uint256)';
