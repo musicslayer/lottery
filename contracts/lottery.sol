@@ -78,11 +78,11 @@ contract MusicslayerLottery {
     uint private ticketPrice;
     uint private currentTicketPrice;
 
-    /* To ensure the safety of player money, the contract balance is accounted for by splitting it into different places:
-        // contractFunds - The money used to pay for gas. The operator can add or withdraw money at will.
-        // playerPrizePool - The money players have paid to purchase tickets. The operator gets a cut of each prize automatically, but otherwise they cannot add or withdraw funds.
-        // bonusPrizePool - The money that has optionally been added to "sweeten the pot" and provide more prize money. The operator can add funds but cannot withdraw them.
-        // claimableBalancePool - The money that has not yet been claimed.
+    /* To ensure the safety of player funds, the contract balance is accounted for by splitting it into different places:
+        // contractFunds - The general funds owned by the contract. The operator can add or withdraw funds at will.
+        // playerPrizePool - The funds players have paid to purchase tickets. The operator cannot add or withdraw funds.
+        // bonusPrizePool - The funds that have optionally been added to "sweeten the pot" and provide a bigger prize. The operator can add funds but cannot withdraw them.
+        // claimableBalancePool - The funds that have not yet been claimed. The operator takes their cut from here, but otherwise they cannot add or withdraw funds.
        Anything else not accounted for is considered to be "extra" funds that are treated the same as contract funds.
     */
     uint private contractFunds;
@@ -759,13 +759,13 @@ contract MusicslayerLottery {
         return getContractFunds();
     }
 
-    /// @notice Returns the player prize pool. This is the amount of money used to purchase tickets in the current lottery.
+    /// @notice Returns the player prize pool. This is the amount of funds used to purchase tickets in the current lottery.
     /// @return The player prize pool.
     function query_getPlayerPrizePool() external view returns (uint) {
         return getPlayerPrizePool();
     }
 
-    /// @notice Returns the bonus prize pool. This is bonus money that anyone can donate to "sweeten the pot".
+    /// @notice Returns the bonus prize pool. This is the amount of bonus funds that anyone can donate to "sweeten the pot".
     /// @return The bonus prize pool.
     function query_getBonusPrizePool() external view returns (uint) {
         return getBonusPrizePool();
