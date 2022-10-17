@@ -3,56 +3,61 @@
 pragma solidity >=0.8.12 <0.9.0;
 
 /**
- * @title Lottery
- * @dev A blockchain lottery
- * @custom:dev-run-script ./scripts/deploy_with_ethers.ts
+ * @title The Musicslayer Lottery
+ * @author Musicslayer
  */
-contract Lottery {
-    /// Reentrancy has been detected.
+contract MusicslayerLottery {
+    /// @notice Reentrancy has been detected.
     error ReentrancyError();
     
-    /// There is no active lottery.
+    /// @notice There is no active lottery.
     error LotteryInactiveError();
 
-    // The lottery is still active and is not ready to be ended.
+    /// @notice The lottery is still active and is not ready to be ended.
     error LotteryActiveError();
 
-    /// The calling address is not the operator.
+    /// @notice The calling address is not the operator.
     error NotOperatorError();
 
-    /// The calling address is not the contract owner.
+    /// @notice The calling address is not the contract owner.
     error NotOwnerError();
 
-    /// The calling address is not the contract owner or the operator.
+    /// @notice The calling address is not the contract owner or the operator.
     error NotOwnerOrOperatorError();
 
-    /// The calling address is not an eligible player.
+    /// @notice The calling address is not an eligible player.
     error NotPlayerError();
 
-    /// The calling address is not payable.
+    /// @notice The calling address is not payable.
     error NotPayableError();
 
-    /// This contract does not have the funds requested.
+    /// @notice This contract does not have the funds requested.
     error InsufficientFundsError(uint contractBalance, uint requestedValue);
 
-    // A record of the owner address changing.
-    event OwnerChanged(address indexed oldOwner, address indexed newOwner);
+    /// @notice A record of the owner address changing.
+    event OwnerChanged(address indexed oldOwnerAddress, address indexed newOwnerAddress);
 
-    // A record of the operator address changing.
-    event OperatorChanged(address indexed oldOperator, address indexed newOperator);
+    /// @notice A record of the operator address changing.
+    event OperatorChanged(address indexed oldOperatorAddress, address indexed newOperatorAddress);
 
-    // A record of a lottery starting.
-    event LotteryStart(uint indexed lotteryBlockStart, uint indexed lotteryBlockDuration, uint indexed ticketPrice);
+    /// @notice A record of a lottery starting.
+    event LotteryStart(uint indexed lotteryNumber, uint indexed lotteryBlockStart, uint indexed lotteryBlockDuration, uint ticketPrice);
 
-    // A record of a lottery ending.
-    event LotteryEnd(uint indexed lotteryBlockStart, uint indexed lotteryBlockEnd, address indexed winningAddress, uint winnerPrize);
+    /// @notice A record of a lottery ending.
+    event LotteryEnd(uint indexed lotteryNumber, uint indexed lotteryBlockStart, address indexed winningAddress, uint winnerPrize);
+
+    /// @notice A record of a lottery being canceled.
+    event LotteryCancel(uint indexed lotteryNumber, uint indexed lotteryBlockStart);
 
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     // Note that the player always receives the entire "bonusPrizePool" amount.
-    uint private constant operatorCut = 3;
+    uint private constant operatorCut = 10;
 
     // A lock variable to prevent reentrancy. Note that a function using the lock cannot call another function that is also using the lock.
     bool private isLocked;
+
+    // The current lottery number.
+    uint private lotteryNumber;
 
     // Block where the lottery started.
     uint private lotteryBlockStart;
@@ -66,7 +71,7 @@ contract Lottery {
     // The owner is the original operator and is able to assign themselves the operator role at any time.
     address private ownerAddress;
 
-    // The operator is responsible for running the lottery. They must fund this contract with gas, and in return they will receive a cut of each prize.
+    // The operator is responsible for running the lottery. In return, they will receive a cut of each prize.
     address private operatorAddress;
 
     // The price of each ticket. If the price is changed, the new price will only apply to future lotteries, not the current one.
@@ -76,8 +81,9 @@ contract Lottery {
     /* To ensure the safety of player money, the contract balance is accounted for by splitting it into different places:
         // contractFunds - The money used to pay for gas. The operator can add or withdraw money at will.
         // playerPrizePool - The money players have paid to purchase tickets. The operator gets a cut of each prize automatically, but otherwise they cannot add or withdraw funds.
-        // bonusPrizePool - The money that the operator has optionally added to "sweeten the pot" and provide more prize money. The operator can add funds but cannot withdraw them.
+        // bonusPrizePool - The money that has optionally been added to "sweeten the pot" and provide more prize money. The operator can add funds but cannot withdraw them.
         // claimableBalancePool - The money that has not yet been claimed.
+       Anything else not accounted for is considered to be "extra" funds that are treated the same as contract funds.
     */
     uint private contractFunds;
     uint private playerPrizePool;
@@ -99,7 +105,6 @@ contract Lottery {
     */
 
     constructor(uint initialLotteryBlockDuration, uint initialTicketPrice) payable {
-        // When deploying this contract, initial funds should be paid to allow for smooth lottery operation.
         addContractFunds(msg.value);
 
         setOwnerAddress(msg.sender);
@@ -112,7 +117,7 @@ contract Lottery {
     }
 
     receive() external payable {
-        // Funds received from a player will be used to buy tickets. Funds received from the operator will be used to fund the contract.
+        // Funds received from a player will be used to buy tickets. Funds received from the operator will be counted as contract funds.
         lock_start();
 
         if(isOperatorAddress(msg.sender)) {
@@ -130,7 +135,7 @@ contract Lottery {
     }
 
     fallback() external payable {
-        // There is no legitimate reason for this to be called.
+        // There is no legitimate reason for this fallback function to be called.
         consumeAllGas();
     }
 
@@ -138,32 +143,30 @@ contract Lottery {
         Lottery Functions
     */
 
-    function buyTickets(address playerAddress, uint value) private {
+    function buyTickets(address _address, uint value) private {
         // Purchase as many tickets as possible for the address with the provided value. Note that tickets can only be purchased in whole number quantities.
         // After spending all the funds on tickets, anything left over will be added to the address's claimable balance.
-        addPlayerPrizePool(value);
-
         uint numTickets = value / currentTicketPrice;
         uint totalTicketValue = numTickets * currentTicketPrice;
         uint unspentValue = value - totalTicketValue;
 
-        map_address2ClaimableBalance[playerAddress] += unspentValue;
-        claimableBalancePool += unspentValue;
+        addPlayerPrizePool(totalTicketValue);
+        addAddressClaimableBalance(_address, unspentValue);
 
-        map_address2NumTickets[playerAddress] += numTickets;
+        map_address2NumTickets[_address] += numTickets;
         for(uint i = 0; i < numTickets; i++) {
-            map_ticket2Address[currentTicketNumber++] = playerAddress;
+            map_ticket2Address[currentTicketNumber++] = _address;
         }
     }
 
     function startNewLottery() private {
         // Reset lottery state and begin a new lottery.
         for(uint i = 0; i < currentTicketNumber; i++) {
-            address playerAddress = map_ticket2Address[i];
+            address _address = map_ticket2Address[i];
 
             // To save gas, don't call delete if we don't have to.
-            if(map_address2NumTickets[playerAddress] != 0) {
-                delete(map_address2NumTickets[playerAddress]);
+            if(map_address2NumTickets[_address] != 0) {
+                delete(map_address2NumTickets[_address]);
             }
             
             // We don't need to clear "map_ticket2Address" here. When we run the next lottery, any remaining data will either be overwritten or unused.
@@ -177,26 +180,27 @@ contract Lottery {
         currentLotteryBlockDuration = lotteryBlockDuration;
         currentTicketPrice = ticketPrice;
 
+        lotteryNumber++;
         lotteryBlockStart = block.number;
 
-        emit LotteryStart(lotteryBlockStart, lotteryBlockDuration, ticketPrice);
+        emit LotteryStart(lotteryNumber, lotteryBlockStart, lotteryBlockDuration, ticketPrice);
     }
 
     function endCurrentLottery() private {
+        // Choose a winner to end the current lottery, credit any prizes rewarded, and then start a new lottery.
         if(isZeroPlayerGame()) {
-            // No one played.
-            emit LotteryEnd(lotteryBlockStart, block.number, address(0), 0);
+            // No one played. For recordkeeping purposes, the winner is the zero address and the prize is zero.
+            emit LotteryEnd(lotteryNumber, lotteryBlockStart, address(0), 0);
         }
         else if(isOnePlayerGame()) {
-            // Since only one person has played, just give them the entire prize.
+            // Since only one person has played, just give them the entire prize. Don't bother picking a random ticket.
             address winningAddress = map_ticket2Address[0];
 
             uint winnerPrize = bonusPrizePool + playerPrizePool;
 
-            map_address2ClaimableBalance[winningAddress] += winnerPrize;
-            claimableBalancePool += winnerPrize;
+            addAddressClaimableBalance(winningAddress, winnerPrize);
 
-            emit LotteryEnd(lotteryBlockStart, block.number, winningAddress, winnerPrize);
+            emit LotteryEnd(lotteryNumber, lotteryBlockStart, winningAddress, winnerPrize);
         }
         else {
             // Give the lottery operator their cut of the pot, and then give the rest to a randomly chosen winner.
@@ -206,18 +210,30 @@ contract Lottery {
             uint operatorPrize = playerPrizePool * operatorCut / 100;
             uint winnerPrize = playerPrizePool + bonusPrizePool - operatorPrize;
 
-            map_address2ClaimableBalance[getOperatorAddress()] += operatorPrize;
-            map_address2ClaimableBalance[winningAddress] += winnerPrize;
-            claimableBalancePool += operatorPrize + winnerPrize;
+            addAddressClaimableBalance(getOperatorAddress(), operatorPrize);
+            addAddressClaimableBalance(winningAddress, winnerPrize);
 
-            emit LotteryEnd(lotteryBlockStart, block.number, winningAddress, winnerPrize);
+            emit LotteryEnd(lotteryNumber, lotteryBlockStart, winningAddress, winnerPrize);
         }
 
         startNewLottery();
     }
 
+    function cancelCurrentLottery() private {
+        // Refund everyone and then start a new lottery. All refunds will be accounted for as claimable balances.
+
+        // To avoid double counting and to keep things simple, we refund each ticket one at a time.
+        for(uint i = 0; i < currentTicketNumber; i++) {
+            addAddressClaimableBalance(map_ticket2Address[i], currentTicketPrice);
+        }
+
+        emit LotteryCancel(lotteryNumber, lotteryBlockStart);
+
+        startNewLottery();
+    }
+
     function isLotteryActive() private view returns (bool) {
-        return block.number - lotteryBlockStart <= lotteryBlockDuration;
+        return block.number - lotteryBlockStart <= currentLotteryBlockDuration;
     }
 
     function requireLotteryActive() private view {
@@ -232,8 +248,8 @@ contract Lottery {
         }
     }
 
-    function totalAddressTickets(address playerAddress) private view returns (uint) {
-        return map_address2NumTickets[playerAddress];
+    function totalAddressTickets(address _address) private view returns (uint) {
+        return map_address2NumTickets[_address];
     }
 
     function totalTickets() private view returns (uint) {
@@ -248,18 +264,17 @@ contract Lottery {
     function isOnePlayerGame() private view returns (bool) {
         // Check to see if there is only one player who has purchased all the tickets.
         // We assume there is at least one ticket.
-        address firstPlayer = map_ticket2Address[0];
-        return totalAddressTickets(firstPlayer) == totalTickets();
+        address firstAddress = map_ticket2Address[0];
+        return totalAddressTickets(firstAddress) == totalTickets();
     }
 
-    function isAddressPlaying(address playerAddress) private view returns (bool) {
-        return map_address2NumTickets[playerAddress] != 0;
+    function isAddressPlaying(address _address) private view returns (bool) {
+        return map_address2NumTickets[_address] != 0;
     }
 
     function chooseWinningTicket(uint numTickets) private view returns (uint) {
-        // This should only be called if at least two different players have purchased tickets.
-        uint winningTicket = randomInt(numTickets);
-        return winningTicket;
+        // Use a random process to choose a winning ticket out of all possible tickets entered into the current lottery.
+        return randomInt(numTickets);
     }
 
     function setLotteryBlockDuration(uint newLotteryBlockDuration) private {
@@ -282,20 +297,6 @@ contract Lottery {
         return currentTicketPrice;
     }
 
-    function withdrawAddressClaimableBalance(address playerAddress) private {
-        // We only allow the entire balance to be claimed.
-        uint balance = map_address2ClaimableBalance[playerAddress];
-
-        map_address2ClaimableBalance[playerAddress] = 0;
-        claimableBalancePool -= balance;
-
-        transferToAddress(playerAddress, balance);
-    }
-
-    function getAddressClaimableBalance(address playerAddress) private view returns (uint) {
-        return map_address2ClaimableBalance[playerAddress];
-    }
-
     /*
         RNG Functions
     */
@@ -310,21 +311,21 @@ contract Lottery {
         Address Restriction Functions
     */
 
-    function setOwnerAddress(address newOwnerAddress) private {
-        emit OwnerChanged(ownerAddress, newOwnerAddress);
-        ownerAddress = newOwnerAddress;
+    function setOwnerAddress(address _address) private {
+        emit OwnerChanged(ownerAddress, _address);
+        ownerAddress = _address;
     }
 
     function getOwnerAddress() private view returns (address) {
         return ownerAddress;
     }
 
-    function isOwnerAddress(address sender) private view returns (bool) {
-        return sender == getOwnerAddress();
+    function isOwnerAddress(address _address) private view returns (bool) {
+        return _address == getOwnerAddress();
     }
 
-    function requireOwnerAddress(address sender) private view {
-        if(!isOwnerAddress(sender)) {
+    function requireOwnerAddress(address _address) private view {
+        if(!isOwnerAddress(_address)) {
             revert NotOwnerError();
         }
     }
@@ -338,44 +339,44 @@ contract Lottery {
         return operatorAddress;
     }
 
-    function isOperatorAddress(address sender) private view returns (bool) {
-        return sender == getOperatorAddress();
+    function isOperatorAddress(address _address) private view returns (bool) {
+        return _address == getOperatorAddress();
     }
 
-    function requireOperatorAddress(address sender) private view {
-        if(!isOperatorAddress(sender)) {
+    function requireOperatorAddress(address _address) private view {
+        if(!isOperatorAddress(_address)) {
             revert NotOperatorError();
         }
     }
 
-    function isOwnerOrOperatorAddress(address sender) private view returns (bool) {
-        return isOwnerAddress(sender) || isOperatorAddress(sender);
+    function isOwnerOrOperatorAddress(address _address) private view returns (bool) {
+        return isOwnerAddress(_address) || isOperatorAddress(_address);
     }
 
-    function requireOwnerOrOperatorAddress(address sender) private view {
-        if(!isOwnerOrOperatorAddress(sender)) {
+    function requireOwnerOrOperatorAddress(address _address) private view {
+        if(!isOwnerOrOperatorAddress(_address)) {
             revert NotOwnerOrOperatorError();
         }
     }
 
-    function isPlayerAddress(address sender) private view returns (bool) {
+    function isPlayerAddress(address _address) private view returns (bool) {
         // The only ineligible player is the operator.
-        return sender != getOperatorAddress();
+        return _address != getOperatorAddress();
     }
 
-    function requirePlayerAddress(address sender) private view {
-        if(!isPlayerAddress(sender)) {
+    function requirePlayerAddress(address _address) private view {
+        if(!isPlayerAddress(_address)) {
             revert NotPlayerError();
         }
     }
 
-    function isPayableAddress(address testAddress) private returns (bool) {
+    function isPayableAddress(address _address) private returns (bool) {
         // If the address is payable, this no-op transfer should succeed.
-        return payable(testAddress).send(0);
+        return payable(_address).send(0);
     }
 
-    function requirePayableAddress(address testAddress) private {
-        if(!isPayableAddress(testAddress)) {
+    function requirePayableAddress(address _address) private {
+        if(!isPayableAddress(_address)) {
             revert NotPayableError();
         }
     }
@@ -393,25 +394,25 @@ contract Lottery {
         contractFunds += value;
     }
 
-    function withdrawContractFunds(uint value) private {
-        // Transfer an amount from the contract balance to the operator.
+    function withdrawContractFunds(address _address, uint value) private {
+        // Withdraw an amount from the contract funds. For the purposes of this function, extra funds are treated as contract funds.
         uint operatorContractBalance = getOperatorContractBalance();
 
         if(value > operatorContractBalance) {
             revert InsufficientFundsError(operatorContractBalance, value);
         }
 
-        // If the value is higher than the extra funds, subtract the difference from "contractFunds". This accounting makes it so extra funds are spent first.
+        // Only if the value is higher than the extra funds do we subtract from "contractFunds". This accounting makes it so extra funds are spent first.
         if(value > getExtraContractBalance()) {
             contractFunds -= (value - getExtraContractBalance());
         }
-        transferToAddress(getOperatorAddress(), value);
+        transferToAddress(_address, value);
     }
 
-    function withdrawAllContractFunds() private {
-        // Transfer the entire contract balance to the operator.
+    function withdrawAllContractFunds(address _address) private {
+        // Withdraw the entire contract funds. For the purposes of this function, extra funds are treated as contract funds.
         contractFunds = 0;
-        transferToAddress(getOperatorAddress(), getOperatorContractBalance());
+        transferToAddress(_address, getOperatorContractBalance());
     }
 
     function getContractFunds() private view returns (uint) {
@@ -443,13 +444,31 @@ contract Lottery {
     function getExtraContractBalance() private view returns (uint) {
         // Returns the amount of "extra" funds this contract has. This should usually be zero, but may be more if funds are sent here in ways that cannot be accounted for.
         // For example, a coinbase transaction or another contract calling "selfdestruct" could send funds here without passing through the "receive" function for proper accounting.
-        assert(getContractBalance() >= getAccountedContractBalance());
         return getContractBalance() - getAccountedContractBalance();
     }
 
     function getOperatorContractBalance() private view returns (uint) {
         // This is the balance that the operator has access to.
         return contractFunds + getExtraContractBalance();
+    }
+
+    function addAddressClaimableBalance(address _address, uint value) private {
+        map_address2ClaimableBalance[_address] += value;
+        claimableBalancePool += value;
+    }
+
+    function withdrawAddressClaimableBalance(address _address) private {
+        // We only allow the entire balance to be claimed.
+        uint balance = map_address2ClaimableBalance[_address];
+
+        map_address2ClaimableBalance[_address] = 0;
+        claimableBalancePool -= balance;
+
+        transferToAddress(_address, balance);
+    }
+
+    function getAddressClaimableBalance(address _address) private view returns (uint) {
+        return map_address2ClaimableBalance[_address];
     }
 
     /*
@@ -487,8 +506,8 @@ contract Lottery {
     }
 
     function consumeAllGas() private pure {
-        // This operation will cause a revert but also consume all the gas.
-        // Because we may not have enough gas to perform any operations, we simply allow this gas to be unaccounted for (i.e. extra funds).
+        // This operation will cause a revert but also consume all the gas. This will punish those who are trying to attack the contract.
+        // As for any payable funds that may have been sent to the caller, because we may not have enough gas to perform any operations, we simply allow this amount to be unaccounted for (i.e. extra funds).
         assembly("memory-safe") { invalid() }
     }
 
@@ -496,14 +515,15 @@ contract Lottery {
         External Functions
     */
 
+    /// @notice The operator can call this to unlock the contract. This is a fail-safe in case something unanticipated has happened.
     function action_unlock() external {
-        // The operator can call this to unlock (not lock) the contract. This is a fail-safe in case something unanticipated has happened.
+        // 
         requireOperatorAddress(msg.sender);
         setLock(false);
     }
 
+    /// @notice The operator can call this to give funds to the contract.
     function action_addContractFunds() external payable {
-        // The operator can call this to give gas to the contract.
         lock_start();
 
         requireOperatorAddress(msg.sender);
@@ -513,8 +533,8 @@ contract Lottery {
         lock_end();
     }
 
+    /// @notice Anyone can call this to add funds to the bonus prize pool.
     function action_addBonusPrizePool() external payable {
-        // Anyone can add funds to the bonus prize pool.
         lock_start();
 
         addBonusPrizePool(msg.value);
@@ -522,8 +542,8 @@ contract Lottery {
         lock_end();
     }
 
+    /// @notice Players can call this to buy tickets for the current lottery, but only if it is still active.
     function action_buyTickets() external payable {
-        // Players can call this to buy tickets for the lottery, but only if it is still active.
         lock_start();
 
         requireLotteryActive();
@@ -535,8 +555,8 @@ contract Lottery {
         lock_end();
     }
 
+    /// @notice Anyone can call this to end the current lottery, but only if it is no longer active.
     function action_endCurrentLottery() external {
-        // Anyone can call this to end the current lottery, but only if it is no longer active.
         lock_start();
 
         requireLotteryInactive();
@@ -546,28 +566,44 @@ contract Lottery {
         lock_end();
     }
 
+    /// @notice The operator can call this at any time to cancel the current lottery and refund everyone. This is a fail-safe in case something unanticipated has happened.
+    function action_cancelCurrentLottery() external {
+        lock_start();
+
+        requireOperatorAddress(msg.sender);
+        
+        cancelCurrentLottery();
+
+        lock_end();
+    }
+
+    
+    /// @notice The operator can call this to withdraw an amount of the contract funds.
+    /// @param value The amounts of contract funds to withdraw.
     function action_withdrawContractFunds(uint value) external {
         lock_start();
 
         requireOperatorAddress(msg.sender);
 
-        withdrawContractFunds(value);
+        withdrawContractFunds(msg.sender, value);
 
         lock_end();
     }
 
+    /// @notice The operator can call this to withdraw all contract funds.
     function action_withdrawAllContractFunds() external {
         lock_start();
 
         requireOperatorAddress(msg.sender);
 
-        withdrawAllContractFunds();
+        withdrawAllContractFunds(msg.sender);
 
         lock_end();
     }
 
+    /// @notice The owner can transfer ownership to a new address.
+    /// @param newOwnerAddress The new owner address.
     function action_setOwnerAddress(address newOwnerAddress) external {
-        // The current owner can transfer ownership to a new address.
         lock_start();
 
         requireOwnerAddress(msg.sender);
@@ -577,8 +613,9 @@ contract Lottery {
         lock_end();
     }
 
+    /// @notice The operator can assign the operator role to a new address.
+    /// @param newOperatorAddress The new operator address.
     function action_setOperatorAddress(address newOperatorAddress) external {
-        // The current operator can assign the operator role to a new address.
         lock_start();
 
         requireOperatorAddress(msg.sender);
@@ -588,8 +625,8 @@ contract Lottery {
         lock_end();
     }
 
+    /// @notice The owner can call this to make themselves the operator.
     function action_setOperatorAddressToOwner() external {
-        // The owner can call this to make themselves the operator.
         lock_start();
 
         requireOwnerAddress(msg.sender);
@@ -599,6 +636,8 @@ contract Lottery {
         lock_end();
     }
 
+    /// @notice The operator can change the duration of the lottery. This change will go into effect starting from the next lottery.
+    /// @param newLotteryBlockDuration The new duration of the lottery in blocks.
     function action_setLotteryBlockDuration(uint newLotteryBlockDuration) external {
         lock_start();
 
@@ -609,6 +648,8 @@ contract Lottery {
         lock_end();
     }
 
+    /// @notice The operator can change the ticket price of the lottery. This change will go into effect starting from the next lottery.
+    /// @param newTicketPrice The new ticket price of the lottery.
     function action_setTicketPrice(uint newTicketPrice) external {
         lock_start();
 
@@ -619,6 +660,7 @@ contract Lottery {
         lock_end();
     }
 
+    /// @notice Anyone can call this to withdraw any claimable balance they have.
     function action_withdrawAddressClaimableBalance() external {
         lock_start();
 
@@ -627,86 +669,123 @@ contract Lottery {
         lock_end();
     }
 
-    function action_withdrawOtherAddressClaimableBalance(address playerAddress) external {
-        // The operator can trigger a withdraw for someone else.
+    /// @notice The operator can trigger a claimable balance withdraw for someone else. This can be used to send funds to winners who do not know how to withdraw themselves.
+    /// @param _address The address that the operator is triggering the claimable balance withdraw for.
+    function action_withdrawOtherAddressClaimableBalance(address _address) external {
         lock_start();
 
         requireOperatorAddress(msg.sender);
 
-        withdrawAddressClaimableBalance(playerAddress);
+        withdrawAddressClaimableBalance(_address);
 
         lock_end();
     }
 
+    /// @notice Returns whether the contract is currently locked.
+    /// @return Whether the contract is currently locked.
     function query_getLock() external view returns (bool) {
         return getLock();
     }
 
+    /// @notice Returns the entire contract balance. This includes all funds, even those that are unaccounted for.
+    /// @return The entire contract balance.
     function query_getContractBalance() external view returns (uint) {
         return getContractBalance();
     }
 
-    function query_totalAddressTickets(address playerAddress) external view returns (uint) {
-        return totalAddressTickets(playerAddress);
+    /// @notice Returns the number of tickets an address has in the current lottery.
+    /// @param _address The address that we are checking the number of tickets for.
+    /// @return The number of tickets the address has in the current lottery.
+    function query_totalAddressTickets(address _address) external view returns (uint) {
+        return totalAddressTickets(_address);
     }
 
+    /// @notice Returns the total number of tickets in the current lottery.
+    /// @return The total number of tickets in the current lottery.
     function query_totalTickets() external view returns (uint) {
         return totalTickets();
     }
 
-    function query_getAddressClaimableBalance(address playerAddress) external view returns (uint) {
-        return getAddressClaimableBalance(playerAddress);
+    /// @notice Returns the claimable balance of the address.
+    /// @param _address The address that we are checking the claimable balance for.
+    /// @return The claimable balance of the address.
+    function query_getAddressClaimableBalance(address _address) external view returns (uint) {
+        return getAddressClaimableBalance(_address);
     }
 
-    function query_isAddressPlaying(address playerAddress) external view returns (bool) {
-        return isAddressPlaying(playerAddress);
+    /// @notice Returns whether the address is playing in the current lottery.
+    /// @param _address The address that we are checking whether it is playing or not.
+    /// @return Whether the address is playing or not.
+    function query_isAddressPlaying(address _address) external view returns (bool) {
+        return isAddressPlaying(_address);
     }
 
-    function query_addressWinChance(address playerAddress) external view returns (uint) {
-        // Returns the predicted number of times that the address will win out of 100 times, truncated to the nearest integer.
-        // This is equivalent to the percentage probability of the address winning.
-        return totalAddressTickets(playerAddress) * 100 / totalTickets();
+    /// @notice Returns the predicted number of times that the address will win out of 100 times, truncated to an integer. This is equivalent to the percentage probability of the address winning.
+    /// @param _address The address that we are checking the win chance for.
+    /// @return The predicted number of times that the address will win out of 100 times.
+    function query_addressWinChance(address _address) external view returns (uint) {
+        return totalAddressTickets(_address) * 100 / totalTickets();
     }
 
-    function query_addressWinChanceOutOf(address playerAddress, uint N) external view returns (uint) {
-        // Returns the predicted number of times that the address will win out of N times, truncated to the nearest integer.
-        // This function can be used to get extra digits in the answer that would normally get truncated.
-        return totalAddressTickets(playerAddress) * N / totalTickets();
+    /// @notice Returns the predicted number of times that the address will win out of N times, truncated to an integer. This function can be used to get extra digits in the answer that would normally get truncated.
+    /// @param _address The address that we are checking the win chance for.
+    /// @param N The total number of times that we want to know how many times the address will win out of.
+    /// @return The predicted number of times that the address will win out of N times.
+    function query_addressWinChanceOutOf(address _address, uint N) external view returns (uint) {
+        return totalAddressTickets(_address) * N / totalTickets();
     }
 
+    /// @notice Returns whether the current lottery is active or not.
+    /// @return Whether the current lottery is active or not.
     function query_isLotteryActive() external view returns (bool) {
         return isLotteryActive();
     }
 
+    /// @notice Returns the current owner address.
+    /// @return The current owner address.
     function query_getOwnerAddress() external view returns (address) {
         return getOwnerAddress();
     }
 
+    /// @notice Returns the current operator address.
+    /// @return The current operator address.
     function query_getOperatorAddress() external view returns (address) {
         return getOperatorAddress();
     }
 
+    /// @notice Returns the amount of funds accounted for as contract funds. Note that the actual contract balance may be higher.
+    /// @return The amount of contract funds.
     function query_getContractFunds() external view returns (uint) {
         return getContractFunds();
     }
 
+    /// @notice Returns the player prize pool. This is the amount of money used to purchase tickets in the current lottery.
+    /// @return The player prize pool.
     function query_getPlayerPrizePool() external view returns (uint) {
         return getPlayerPrizePool();
     }
 
+    /// @notice Returns the bonus prize pool. This is bonus money that anyone can donate to "sweeten the pot".
+    /// @return The bonus prize pool.
     function query_getBonusPrizePool() external view returns (uint) {
         return getBonusPrizePool();
     }
 
+    /// @notice Returns the duration of the current lottery in blocks.
+    /// @return The duration of the current lottery in blocks.
     function query_getLotteryBlockDuration() external view returns (uint) {
         return getLotteryBlockDuration();
     }
 
+    /// @notice Returns the ticket price of the current lottery.
+    /// @return The ticket price of the current lottery.
     function query_getTicketPrice() external view returns (uint) {
         return getTicketPrice();
     }
 
-    error InternalInfo(
+    error InternalInfo1(
+        uint operatorCut,
+        bool isLocked,
         uint lotteryBlockStart,
         uint lotteryBlockDuration,
         uint currentLotteryBlockDuration,
@@ -716,17 +795,17 @@ contract Lottery {
         uint currentTicketPrice,
         uint contractFunds,
         uint playerPrizePool,
-        uint bonusPrizePool,
-        uint claimableBalancePool,
-        uint currentTicketNumber
+        uint bonusPrizePool
     );
 
-    function query_getInternalInfo() external view {
-        // The owner or the operator can call this to get information about the internal state of the contract.
-        // Note that we use an error as it is the easiest way to aggregate and reveal all the information we want.
+    /// @notice The owner or the operator can call this to get information about the internal state of the contract.
+    function query_getInternalInfo1() external view {
+        // We use an error as it is the easiest way to aggregate and reveal all the information we want.
         requireOwnerOrOperatorAddress(msg.sender);
 
-        revert InternalInfo(
+        revert InternalInfo1(
+            operatorCut,
+            isLocked,
             lotteryBlockStart,
             lotteryBlockDuration,
             currentLotteryBlockDuration,
@@ -736,7 +815,21 @@ contract Lottery {
             currentTicketPrice,
             contractFunds,
             playerPrizePool,
-            bonusPrizePool,
+            bonusPrizePool
+        );
+    }
+
+    error InternalInfo2(
+        uint claimableBalancePool,
+        uint currentTicketNumber
+    );
+
+    /// @notice The owner or the operator can call this to get information about the internal state of the contract.
+    function query_getInternalInfo2() external view {
+        // We use an error as it is the easiest way to aggregate and reveal all the information we want.
+        requireOwnerOrOperatorAddress(msg.sender);
+
+        revert InternalInfo2(
             claimableBalancePool,
             currentTicketNumber
         );

@@ -10,8 +10,9 @@ async function async_runFoo() {
     const fooContract = await fooFactory.deploy();
     await fooContract.deployed();
 
-    const call_foo = await fooContract.foo();
-    await call_foo.wait();
+    const call_foo = await fooContract.foo(500000);
+    //await call_foo.wait();
+    console.log(call_foo);
 }
 
 async_runFoo().catch(handleError);
