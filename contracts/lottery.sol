@@ -2,18 +2,78 @@
 
 pragma solidity >=0.8.12 <0.9.0;
 
+// The lottery contract is NOT a token. We only use this interface so that any tokens sent to this contract can be accessed.
+interface IERC20 {
+    function totalSupply() external view returns (uint256);
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function allowance(address owner, address spender) external view returns (uint256);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+}
+
+// Chainlink VRF contracts.
+
+// import "@chainlink/contracts/src/v0.8/interfaces/LinkTokenInterface.sol";
+interface LinkTokenInterface {
+    function allowance(address owner, address spender) external view returns (uint256 remaining);
+    function approve(address spender, uint256 value) external returns (bool success);
+    function balanceOf(address owner) external view returns (uint256 balance);
+    function decimals() external view returns (uint8 decimalPlaces);
+    function decreaseApproval(address spender, uint256 addedValue) external returns (bool success);
+    function increaseApproval(address spender, uint256 subtractedValue) external;
+    function name() external view returns (string memory tokenName);
+    function symbol() external view returns (string memory tokenSymbol);
+    function totalSupply() external view returns (uint256 totalTokensIssued);
+    function transfer(address to, uint256 value) external returns (bool success);
+    function transferAndCall(address to, uint256 value, bytes calldata data) external returns (bool success);
+    function transferFrom(address from, address to, uint256 value) external returns (bool success);
+}
+
+// import "@chainlink/contracts/src/v0.8/interfaces/VRFV2WrapperInterface.sol";
+interface VRFV2WrapperInterface {
+    function lastRequestId() external view returns (uint256);
+    function calculateRequestPrice(uint32 _callbackGasLimit) external view returns (uint256);
+    function estimateRequestPrice(uint32 _callbackGasLimit, uint256 _requestGasPriceWei) external view returns (uint256);
+}
+
+// import "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
+abstract contract VRFV2WrapperConsumerBase {
+    LinkTokenInterface internal immutable LINK;
+    VRFV2WrapperInterface internal immutable VRF_V2_WRAPPER;
+
+    constructor(address _link, address _vrfV2Wrapper) {
+        LINK = LinkTokenInterface(_link);
+        VRF_V2_WRAPPER = VRFV2WrapperInterface(_vrfV2Wrapper);
+    }
+
+    function requestRandomness(uint32 _callbackGasLimit, uint16 _requestConfirmations, uint32 _numWords) internal returns (uint256 requestId) {
+        LINK.transferAndCall(address(VRF_V2_WRAPPER), VRF_V2_WRAPPER.calculateRequestPrice(_callbackGasLimit), abi.encode(_callbackGasLimit, _requestConfirmations, _numWords));
+        return VRF_V2_WRAPPER.lastRequestId();
+    }
+
+    function fulfillRandomWords(uint256 _requestId, uint256[] memory _randomWords) internal virtual;
+
+    function rawFulfillRandomWords(uint256 _requestId, uint256[] memory _randomWords) external {
+        require(msg.sender == address(VRF_V2_WRAPPER), "only VRF V2 wrapper can fulfill");
+        fulfillRandomWords(_requestId, _randomWords);
+    }
+}
+
 /**
  * @title The Musicslayer Lottery
  * @author Musicslayer
  */
-contract MusicslayerLottery {
+contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice Reentrancy has been detected.
     error ReentrancyError();
     
-    /// @notice There is no active lottery.
+    /// @notice The current lottery is not active and tickets purchases are not allowed.
     error LotteryInactiveError();
 
-    /// @notice The lottery is still active and is not ready to be ended.
+    /// @notice The current lottery is active and is not ready to be ended.
     error LotteryActiveError();
 
     /// @notice The calling address is not the operator.
@@ -34,6 +94,21 @@ contract MusicslayerLottery {
     /// @notice This contract does not have the funds requested.
     error InsufficientFundsError(uint contractBalance, uint requestedValue);
 
+    /// @notice This withdraw would not honor the Chainlink minimum reserve requirement.
+    error ChainlinkMinimumReserveError();
+
+    /// @notice The requestId of the VRF request does not match the requestId of the callback.
+    error ChainlinkVRFRequestIdMismatch();
+
+    /// @notice Drawing a winning ticket is not allowed at this time.
+    error DrawWinningTicketError();
+
+    /// @notice A winning ticket has not been drawn yet.
+    error NoWinningTicketError();
+
+    /// @notice The required penalty has not been paid.
+    error PenaltyNotPaidError(uint value, uint penalty);
+
     /// @notice A record of the owner address changing.
     event OwnerChanged(address indexed oldOwnerAddress, address indexed newOwnerAddress);
 
@@ -48,6 +123,9 @@ contract MusicslayerLottery {
 
     /// @notice A record of a lottery being canceled.
     event LotteryCancel(uint indexed lotteryNumber, uint indexed lotteryBlockStart);
+
+    /// @notice A record of a winning ticket being drawn.
+    event WinningTicketDrawn(uint indexed winningTicket, uint indexed totalTickets);
 
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     // Note that the player always receives the entire "bonusPrizePool" amount.
@@ -100,11 +178,25 @@ contract MusicslayerLottery {
     // For the operator, this balance is from their cut of the prize.
     mapping(address => uint) private map_address2ClaimableBalance;
 
+    // Chainlink tokens cannot be withdrawn from this contract beyond this reserve amount.
+    uint private constant chainlinkMinimumReserve = 20e18; // 20 LINK
+
+    // Chainlink token and VRF info.
+    address private constant chainlinkAddress = 0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06;
+    address private constant chainlinkWrapperAddress = 0x699d428ee890d55D56d5FC6e26290f3247A762bd;
+
+    bool private chainlinkRequestIdSet;
+    uint256 private chainlinkRequestIdBlock;
+    uint256 private chainlinkRequestId;
+
+    bool private winningTicketSet;
+    uint private winningTicket;
+
     /*
         Contract Functions
     */
 
-    constructor(uint initialLotteryBlockDuration, uint initialTicketPrice) payable {
+    constructor(uint initialLotteryBlockDuration, uint initialTicketPrice) VRFV2WrapperConsumerBase(chainlinkAddress, chainlinkWrapperAddress) payable {
         addContractFunds(msg.value);
 
         setOwnerAddress(msg.sender);
@@ -136,7 +228,7 @@ contract MusicslayerLottery {
 
     fallback() external payable {
         // There is no legitimate reason for this fallback function to be called.
-        consumeAllGas();
+        punish();
     }
 
     /*
@@ -183,45 +275,45 @@ contract MusicslayerLottery {
         lotteryNumber++;
         lotteryBlockStart = block.number;
 
+        chainlinkRequestIdSet = false;
+        winningTicketSet = false;
+
         emit LotteryStart(lotteryNumber, lotteryBlockStart, lotteryBlockDuration, ticketPrice);
     }
 
     function endCurrentLottery() private {
-        // Choose a winner to end the current lottery, credit any prizes rewarded, and then start a new lottery.
+        // End the current lottery, credit any prizes rewarded, and then start a new lottery.
+        requireWinningTicket();
+
+        address winningAddress;
+        uint operatorPrize;
+        uint winnerPrize;
+
         if(isZeroPlayerGame()) {
             // No one played. For recordkeeping purposes, the winner is the zero address and the prize is zero.
-            emit LotteryEnd(lotteryNumber, lotteryBlockStart, address(0), 0);
         }
         else if(isOnePlayerGame()) {
-            // Since only one person has played, just give them the entire prize. Don't bother picking a random ticket.
-            address winningAddress = map_ticket2Address[0];
-
-            uint winnerPrize = bonusPrizePool + playerPrizePool;
-
-            addAddressClaimableBalance(winningAddress, winnerPrize);
-
-            emit LotteryEnd(lotteryNumber, lotteryBlockStart, winningAddress, winnerPrize);
+            // Since only one person has played, just give them the entire prize.
+            winningAddress = map_ticket2Address[0];
+            winnerPrize = bonusPrizePool + playerPrizePool;
         }
         else {
-            // Give the lottery operator their cut of the pot, and then give the rest to a randomly chosen winner.
-            uint winningTicket = chooseWinningTicket(currentTicketNumber);
-            address winningAddress = map_ticket2Address[winningTicket];
-            
-            uint operatorPrize = playerPrizePool * operatorCut / 100;
-            uint winnerPrize = playerPrizePool + bonusPrizePool - operatorPrize;
-
-            addAddressClaimableBalance(getOperatorAddress(), operatorPrize);
-            addAddressClaimableBalance(winningAddress, winnerPrize);
-
-            emit LotteryEnd(lotteryNumber, lotteryBlockStart, winningAddress, winnerPrize);
+            // Give the lottery operator their cut of the pot, and then give the rest to the randomly chosen winner.
+            winningAddress = map_ticket2Address[winningTicket];
+            operatorPrize = playerPrizePool * operatorCut / 100;
+            winnerPrize = playerPrizePool + bonusPrizePool - operatorPrize;
         }
+
+        addAddressClaimableBalance(getOperatorAddress(), operatorPrize);
+        addAddressClaimableBalance(winningAddress, winnerPrize);
+
+        emit LotteryEnd(lotteryNumber, lotteryBlockStart, winningAddress, winnerPrize);
 
         startNewLottery();
     }
 
     function cancelCurrentLottery() private {
         // Refund everyone and then start a new lottery. All refunds will be accounted for as claimable balances.
-
         // To avoid double counting and to keep things simple, we refund each ticket one at a time.
         for(uint i = 0; i < currentTicketNumber; i++) {
             addAddressClaimableBalance(map_ticket2Address[i], currentTicketPrice);
@@ -245,6 +337,12 @@ contract MusicslayerLottery {
     function requireLotteryInactive() private view {
         if(isLotteryActive()) {
             revert LotteryActiveError();
+        }
+    }
+
+    function requireWinningTicket() private view {
+        if(!winningTicketSet) {
+            revert NoWinningTicketError();
         }
     }
 
@@ -272,11 +370,6 @@ contract MusicslayerLottery {
         return map_address2NumTickets[_address] != 0;
     }
 
-    function chooseWinningTicket(uint numTickets) private view returns (uint) {
-        // Use a random process to choose a winning ticket out of all possible tickets entered into the current lottery.
-        return randomInt(numTickets);
-    }
-
     function setLotteryBlockDuration(uint newLotteryBlockDuration) private {
         // Do not set the current lottery block duration here. When the next lottery starts, the current lottery block duration will be updated.
         lotteryBlockDuration = newLotteryBlockDuration;
@@ -297,14 +390,48 @@ contract MusicslayerLottery {
         return currentTicketPrice;
     }
 
+    function getPenaltyPayment() private view returns (uint) {
+        // The base penalty is 10 times the current ticket price.
+        // If the lottery is inactive and there are at least two players, then the penalty is doubled.
+        uint penalty = 10 * currentTicketPrice;
+        if(!isLotteryActive() && !isZeroPlayerGame() && !isOnePlayerGame()) {
+            penalty *= 2;
+        }
+        return penalty;
+    }
+
+    function requirePenaltyPayment(uint value) private view {
+        if(value < getPenaltyPayment()) {
+            revert PenaltyNotPaidError(value, getPenaltyPayment());
+        }
+    }
+
     /*
         RNG Functions
     */
 
-    function randomInt(uint N) private view returns (uint) {
-        // Generate a random integer 0 <= n < N.
-        uint randomHash = uint(keccak256(abi.encodePacked(block.difficulty, block.timestamp)));
-        return randomHash % N;
+    function drawWinningTicket() private {
+        // We protect against someone drawing multiple tickets until they win, but we allow redraws if the random number has not been received after a certain number of blocks.
+        if(winningTicketSet || (chainlinkRequestIdSet && block.number - chainlinkRequestIdBlock < 400)) { // About 20 minutes
+            revert DrawWinningTicketError();
+        }
+
+        chainlinkRequestIdSet = true;
+        chainlinkRequestIdBlock = block.number;
+        chainlinkRequestId = requestRandomness(100000, 200, 1);
+    }
+
+    function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords) internal override {
+        // This is the Chainlink VRF callback that will give us the random number we requested. We use this to choose a winning ticket.
+        if(chainlinkRequestId != requestId) {
+            revert ChainlinkVRFRequestIdMismatch();
+        }
+
+        winningTicketSet = true;
+        uint randomNumber = randomWords[0];
+        winningTicket = randomNumber % currentTicketNumber;
+
+        emit WinningTicketDrawn(winningTicket, currentTicketNumber);
     }
 
     /*
@@ -346,16 +473,6 @@ contract MusicslayerLottery {
     function requireOperatorAddress(address _address) private view {
         if(!isOperatorAddress(_address)) {
             revert NotOperatorError();
-        }
-    }
-
-    function isOwnerOrOperatorAddress(address _address) private view returns (bool) {
-        return isOwnerAddress(_address) || isOperatorAddress(_address);
-    }
-
-    function requireOwnerOrOperatorAddress(address _address) private view {
-        if(!isOwnerOrOperatorAddress(_address)) {
-            revert NotOwnerOrOperatorError();
         }
     }
 
@@ -484,9 +601,9 @@ contract MusicslayerLottery {
     }
 
     function lock_start() private {
-        // Call this at the start of each external function. If the lock is already set, we error to prevent reentrancy.
+        // Call this at the start of each external function that can change state to protect against reentrancy.
         if(getLock()) {
-            revert ReentrancyError();
+            punish();
         }
         setLock(true);
     }
@@ -500,27 +617,41 @@ contract MusicslayerLottery {
         Utility Functions
     */
 
-    function transferToAddress(address recipientAddress, uint value) private {
-        // The caller is responsible for making sure that the address is actually payable.
-        payable(recipientAddress).transfer(value);
+    function punish() private pure {
+        // This operation will cause a revert but also consume all the gas. This will punish those who are trying to attack the contract.
+        assembly("memory-safe") { invalid() }
     }
 
-    function consumeAllGas() private pure {
-        // This operation will cause a revert but also consume all the gas. This will punish those who are trying to attack the contract.
-        // As for any payable funds that may have been sent to the caller, because we may not have enough gas to perform any operations, we simply allow this amount to be unaccounted for (i.e. extra funds).
-        assembly("memory-safe") { invalid() }
+    function transferToAddress(address _address, uint value) private {
+        // The caller is responsible for making sure that the address is actually payable.
+        payable(_address).transfer(value);
+    }
+
+    function withdrawTokenBalance(address tokenContractAddress, address _address) private {
+        // For Chainlink, we honor the minimum reserve requirement. For any other token, just withdraw the entire balance.
+        IERC20 tokenContract = IERC20(tokenContractAddress);
+        uint tokenBalance = tokenContract.balanceOf(address(this));
+
+        if(tokenContractAddress == chainlinkAddress) {
+            if(tokenBalance >= chainlinkMinimumReserve) {
+                tokenBalance -= chainlinkMinimumReserve;
+            }
+            else {
+                revert ChainlinkMinimumReserveError();
+            }
+        }
+
+        tokenContract.transfer(_address, tokenBalance);
+    }
+
+    function getTokenBalance(address tokenContractAddress) private view returns (uint) {
+        IERC20 tokenContract = IERC20(tokenContractAddress);
+        return tokenContract.balanceOf(address(this));
     }
 
     /*
         External Functions
     */
-
-    /// @notice The operator can call this to unlock the contract. This is a fail-safe in case something unanticipated has happened.
-    function action_unlock() external {
-        // 
-        requireOperatorAddress(msg.sender);
-        setLock(false);
-    }
 
     /// @notice The operator can call this to give funds to the contract.
     function action_addContractFunds() external payable {
@@ -555,22 +686,34 @@ contract MusicslayerLottery {
         lock_end();
     }
 
-    /// @notice Anyone can call this to end the current lottery, but only if it is no longer active.
-    function action_endCurrentLottery() external {
+    /// @notice Anyone can call this to draw the winning ticket, but only if the current lottery is no longer active.
+    function action_drawWinningTicket() external {
         lock_start();
 
         requireLotteryInactive();
+
+        drawWinningTicket();
+
+        lock_end();
+    }
+
+    /// @notice Anyone can call this to end the current lottery, but only if a winning ticket has been drawn.
+    function action_endCurrentLottery() external {
+        lock_start();
+
+        requireWinningTicket();
 
         endCurrentLottery();
 
         lock_end();
     }
 
-    /// @notice The operator can call this at any time to cancel the current lottery and refund everyone. This is a fail-safe in case something unanticipated has happened.
-    function action_cancelCurrentLottery() external {
+    /// @notice The operator can call this at any time to cancel the current lottery and refund everyone. The operator gives up their cut and must pay a penalty fee to do this.
+    function action_cancelCurrentLottery() external payable {
         lock_start();
 
         requireOperatorAddress(msg.sender);
+        requirePenaltyPayment(msg.value);
         
         cancelCurrentLottery();
 
@@ -681,6 +824,18 @@ contract MusicslayerLottery {
         lock_end();
     }
 
+    /// @notice The operator can withdraw all of one kind of token. Note that Chainlink is subject to a minimum reserve requirement.
+    /// @param tokenContractAddress The address where the token's contract lives.
+    function action_withdrawTokenBalance(address tokenContractAddress) external {
+        lock_start();
+
+        requireOperatorAddress(msg.sender);
+
+        withdrawTokenBalance(tokenContractAddress, msg.sender);
+
+        lock_end();
+    }
+
     /// @notice Returns whether the contract is currently locked.
     /// @return Whether the contract is currently locked.
     function query_getLock() external view returns (bool) {
@@ -783,55 +938,30 @@ contract MusicslayerLottery {
         return getTicketPrice();
     }
 
-    error InternalInfo1(
-        uint operatorCut,
-        bool isLocked,
-        uint lotteryBlockStart,
-        uint lotteryBlockDuration,
-        uint currentLotteryBlockDuration,
-        address ownerAddress,
-        address operatorAddress,
-        uint ticketPrice,
-        uint currentTicketPrice,
-        uint contractFunds,
-        uint playerPrizePool,
-        uint bonusPrizePool
-    );
-
-    /// @notice The owner or the operator can call this to get information about the internal state of the contract.
-    function query_getInternalInfo1() external view {
-        // We use an error as it is the easiest way to aggregate and reveal all the information we want.
-        requireOwnerOrOperatorAddress(msg.sender);
-
-        revert InternalInfo1(
-            operatorCut,
-            isLocked,
-            lotteryBlockStart,
-            lotteryBlockDuration,
-            currentLotteryBlockDuration,
-            ownerAddress,
-            operatorAddress,
-            ticketPrice,
-            currentTicketPrice,
-            contractFunds,
-            playerPrizePool,
-            bonusPrizePool
-        );
+    /// @notice Returns the balance of a token.
+    /// @param tokenContractAddress The address where the token's contract lives.
+    /// @return The token balance.
+    function query_getTokenBalance(address tokenContractAddress) external view returns (uint) {
+        return getTokenBalance(tokenContractAddress);
     }
 
-    error InternalInfo2(
-        uint claimableBalancePool,
-        uint currentTicketNumber
-    );
+    /// @notice The owner can call this to unlock the contract.
+    function failsafe_unlock() external {
+        requireOwnerAddress(msg.sender);
+        setLock(false);
+    }
 
-    /// @notice The owner or the operator can call this to get information about the internal state of the contract.
-    function query_getInternalInfo2() external view {
-        // We use an error as it is the easiest way to aggregate and reveal all the information we want.
-        requireOwnerOrOperatorAddress(msg.sender);
+    /// @notice The owner can call this to get information about the internal state of the contract.
+    function diagnostic_getInternalInfo1() external view returns (uint _operatorCut, bool _isLocked, uint _lotteryBlockStart, uint _lotteryBlockDuration, uint _currentLotteryBlockDuration, address _ownerAddress, address _operatorAddress, uint _ticketPrice, uint _currentTicketPrice, uint _contractFunds, uint _playerPrizePool, uint _bonusPrizePool) {
+        requireOwnerAddress(msg.sender);
 
-        revert InternalInfo2(
-            claimableBalancePool,
-            currentTicketNumber
-        );
+        return(operatorCut, isLocked, lotteryBlockStart, lotteryBlockDuration, currentLotteryBlockDuration, ownerAddress, operatorAddress, ticketPrice, currentTicketPrice, contractFunds, playerPrizePool, bonusPrizePool);
+    }
+
+    /// @notice The owner can call this to get information about the internal state of the contract.
+    function diagnostic_getInternalInfo2() external view returns (uint _claimableBalancePool, uint _currentTicketNumber) {
+        requireOwnerAddress(msg.sender);
+
+        return(claimableBalancePool, currentTicketNumber);
     }
 }
