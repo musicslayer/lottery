@@ -67,41 +67,32 @@ abstract contract VRFV2WrapperConsumerBase {
  * @author Musicslayer
  */
 contract MusicslayerLottery is VRFV2WrapperConsumerBase {
-    /// @notice Reentrancy has been detected.
-    error ReentrancyError();
-    
     /// @notice The current lottery is not active and tickets purchases are not allowed.
     error LotteryInactiveError();
 
     /// @notice The current lottery is active and is not ready to be ended.
     error LotteryActiveError();
 
-    /// @notice The calling address is not the operator.
-    error NotOperatorError();
-
     /// @notice The calling address is not the contract owner.
-    error NotOwnerError();
+    error NotOwnerError(address _address, address ownerAddress);
 
-    /// @notice The calling address is not the contract owner or the operator.
-    error NotOwnerOrOperatorError();
+    /// @notice The calling address is not the operator.
+    error NotOperatorError(address _address, address operatorAddress);
 
     /// @notice The calling address is not an eligible player.
-    error NotPlayerError();
-
-    /// @notice The calling address is not payable.
-    error NotPayableError();
+    error NotPlayerError(address _address);
 
     /// @notice This contract does not have the funds requested.
-    error InsufficientFundsError(uint contractBalance, uint requestedValue);
+    error InsufficientFundsError(uint requestedValue, uint contractBalance);
 
-    /// @notice This withdraw would not honor the Chainlink minimum reserve requirement.
-    error ChainlinkMinimumReserveError();
+    /// @notice Withdrawing any Chainlink would violate the minimum reserve requirement.
+    error ChainlinkMinimumReserveError(uint chainlinkMinimumReserve);
 
     /// @notice The requestId of the VRF request does not match the requestId of the callback.
-    error ChainlinkVRFRequestIdMismatch();
+    error ChainlinkVRFRequestIdMismatch(uint callbackRequestId, uint expectedRequestId);
 
     /// @notice The VRF request was initiated during a previous lottery.
-    error ChainlinkVRFRequestStale();
+    error ChainlinkVRFRequestStale(uint requestLotteryNumber, uint currentLotteryNumber);
 
     /// @notice Drawing a winning ticket is not allowed at this time.
     error DrawWinningTicketError();
@@ -491,11 +482,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function fulfillRandomWords(uint requestId, uint[] memory randomWords) internal override {
         // This is the Chainlink VRF callback that will give us the random number we requested. We use this to choose a winning ticket.
         if(chainlinkRequestId != requestId) {
-            revert ChainlinkVRFRequestIdMismatch();
+            revert ChainlinkVRFRequestIdMismatch(requestId, chainlinkRequestId);
         }
 
         if(chainlinkRequestIdLotteryNumber != lotteryNumber) {
-            revert ChainlinkVRFRequestStale();
+            revert ChainlinkVRFRequestStale(chainlinkRequestIdLotteryNumber, lotteryNumber);
         }
 
         isWinningTicketSet = true;
@@ -524,7 +515,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function requireOwnerAddress(address _address) private view {
         if(!isOwnerAddress(_address)) {
-            revert NotOwnerError();
+            revert NotOwnerError(_address, getOwnerAddress());
         }
     }
 
@@ -543,7 +534,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function requireOperatorAddress(address _address) private view {
         if(!isOperatorAddress(_address)) {
-            revert NotOperatorError();
+            revert NotOperatorError(_address, getOperatorAddress());
         }
     }
 
@@ -554,7 +545,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function requirePlayerAddress(address _address) private view {
         if(!isPlayerAddress(_address)) {
-            revert NotPlayerError();
+            revert NotPlayerError(_address);
         }
     }
 
@@ -595,7 +586,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         uint operatorContractBalance = getOperatorContractBalance();
 
         if(value > operatorContractBalance) {
-            revert InsufficientFundsError(operatorContractBalance, value);
+            revert InsufficientFundsError(value, operatorContractBalance);
         }
 
         // Only if the value is higher than the extra funds do we subtract from "contractFunds". This accounting makes it so extra funds are spent first.
@@ -732,7 +723,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
                 tokenBalance -= chainlinkMinimumReserve;
             }
             else {
-                revert ChainlinkMinimumReserveError();
+                revert ChainlinkMinimumReserveError(chainlinkMinimumReserve);
             }
         }
 
