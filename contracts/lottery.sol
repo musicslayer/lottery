@@ -568,7 +568,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function getAccountedContractBalance() private view returns (uint) {
-        return contractFunds + playerPrizePool + bonusPrizePool + claimableBalancePool;
+        return contractFunds + playerPrizePool + bonusPrizePool + claimableBalancePool + refundPool;
     }
 
     function getExtraContractBalance() private view returns (uint) {
