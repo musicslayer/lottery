@@ -260,8 +260,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function startNewLottery() private {
         // Reset lottery state and begin a new lottery. The contract is designed so that we don't need to clear any of the mappings, something that saves a lot of gas.
-        playerPrizePool = 0; // TODO Don't do this here
-        bonusPrizePool = 0; // TODO Don't do this here
+        currentTicketNumber = 0;
 
         // If any of these values have been changed by the operator, update them now before starting the next lottery.
         currentLotteryBlockDuration = lotteryBlockDuration;
@@ -269,7 +268,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
         lotteryNumber++;
         lotteryBlockStart = block.number;
-        currentTicketNumber = 0;
 
         chainlinkRequestIdSet = false;
         winningTicketSet = false;
@@ -301,6 +299,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         addAddressClaimableBalance(getOperatorAddress(), operatorPrize);
         addAddressClaimableBalance(winningAddress, winnerPrize);
 
+        playerPrizePool = 0;
+        bonusPrizePool = 0;
+
         emit LotteryEnd(lotteryNumber, lotteryBlockStart, winningAddress, winnerPrize);
 
         startNewLottery();
@@ -323,12 +324,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         emit LotteryCancel(lotteryNumber, lotteryBlockStart);
 
         // Move funds in the player prize pool to the refund pool. Players who have purchased tickets may request a refund manually.
-        addRefundPool(getPlayerPrizePool());
+        addRefundPool(playerPrizePool);
+        playerPrizePool = 0;
 
         // Carry over the existing bonus prize pool and add in the penalty value.
-        uint currentBonusPrizePool = bonusPrizePool;
+        addBonusPrizePool(value);
+
         startNewLottery();
-        addBonusPrizePool(currentBonusPrizePool + value);
     }
 
     function isLotteryActive() private view returns (bool) {
