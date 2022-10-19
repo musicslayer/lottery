@@ -205,7 +205,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     address private constant chainlinkWrapperAddress = 0x699d428ee890d55D56d5FC6e26290f3247A762bd;
 
     uint32 private constant chainlinkCallbackGasLimit = 100000; // This was chosen experimentally.
-    uint16 chainlinkRequestConfirmations = 200; // Use the maximum allowed value of 200 blocks (about ten minutes) to be extra secure.
+    uint16 chainlinkRequestConfirmationBlocks = 200; // Use the maximum allowed value of 200 blocks to be extra secure.
+    uint16 chainlinkRequestRetryBlocks = 600; // If we request a random number but don't get it after 600 blocks, we can make a new request.
 
     bool private isChainlinkRequestIdSet;
     uint private chainlinkRequestIdBlock;
@@ -472,15 +473,19 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     function drawWinningTicket() private {
-        // We protect against someone drawing multiple tickets until they win, but we allow redraws if the random number has not been received after a certain number of blocks.
-        if(isWinningTicketSet || (isChainlinkRequestIdSet && block.number - chainlinkRequestIdBlock < 400)) { // About 20 minutes
+        if(isWinningTicketSet || (isChainlinkRequestIdSet && !isRetryPermitted())) {
             revert DrawWinningTicketError();
         }
 
         isChainlinkRequestIdSet = true;
         chainlinkRequestIdBlock = block.number;
         chainlinkRequestIdLotteryNumber = lotteryNumber;
-        chainlinkRequestId = requestRandomness(chainlinkCallbackGasLimit, chainlinkRequestConfirmations, 1);
+        chainlinkRequestId = requestRandomness(chainlinkCallbackGasLimit, chainlinkRequestConfirmationBlocks, 1);
+    }
+
+    function isRetryPermitted() private view returns (bool) {
+        // We allow for a redraw if the random number has not been received after a certain number of blocks. This would be needed if Chainlink ever experiences an outage.
+        return block.number - chainlinkRequestIdBlock >= chainlinkRequestRetryBlocks;
     }
 
     function fulfillRandomWords(uint requestId, uint[] memory randomWords) internal override {
