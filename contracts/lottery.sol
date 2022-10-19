@@ -161,17 +161,20 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         // playerPrizePool - The funds players have paid to purchase tickets. The operator cannot add or withdraw funds.
         // bonusPrizePool - The funds that have optionally been added to "sweeten the pot" and provide a bigger prize. The operator can add funds but cannot withdraw them.
         // claimableBalancePool - The funds that have not yet been claimed. The operator takes their cut from here, but otherwise they cannot add or withdraw funds.
+        // refundPool - The funds that were in the playerPrizePool for a lottery that was canceled. Players can manually request refunds for any tickets they have purchased.
        Anything else not accounted for is considered to be "extra" funds that are treated the same as contract funds.
     */
     uint private contractFunds;
     uint private playerPrizePool;
     uint private bonusPrizePool;
     uint private claimableBalancePool;
+    uint private refundPool;
 
     // Variables to keep track of who is playing and how many tickets they have.
     uint private currentTicketNumber;
     mapping(uint => address) private map_ticket2Address;
-    mapping(address => uint) private map_address2NumTickets;
+    mapping(uint => mapping(address => uint)) private map_lotteryNum2Address2NumTickets;
+    mapping(uint => bool) private map_lotteryNum2IsRefundable;
 
     // Mapping of addresses to claimable balances.
     // For players, this balance is from winnings or from leftover funds after purchasing tickets.
@@ -244,29 +247,21 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
         addPlayerPrizePool(totalTicketValue);
         addAddressClaimableBalance(_address, unspentValue);
-
-        map_address2NumTickets[_address] += numTickets;
-        for(uint i = 0; i < numTickets; i++) {
-            map_ticket2Address[currentTicketNumber++] = _address;
+        
+        // To save gas, only write the information for the first purchased ticket, and then every 100 afterwards.
+        uint lastTicketNumber = currentTicketNumber + numTickets;
+        for(uint i = currentTicketNumber; i < lastTicketNumber; i += 100) {
+            map_ticket2Address[i] = _address;
         }
+
+        map_lotteryNum2Address2NumTickets[lotteryNumber][_address] += numTickets;
+        currentTicketNumber = lastTicketNumber;
     }
 
     function startNewLottery() private {
-        // Reset lottery state and begin a new lottery.
-        for(uint i = 0; i < currentTicketNumber; i++) {
-            address _address = map_ticket2Address[i];
-
-            // To save gas, don't call delete if we don't have to.
-            if(map_address2NumTickets[_address] != 0) {
-                delete(map_address2NumTickets[_address]);
-            }
-            
-            // We don't need to clear "map_ticket2Address" here. When we run the next lottery, any remaining data will either be overwritten or unused.
-        }
-
-        currentTicketNumber = 0;
-        playerPrizePool = 0;
-        bonusPrizePool = 0;
+        // Reset lottery state and begin a new lottery. The contract is designed so that we don't need to clear any of the mappings, something that saves a lot of gas.
+        playerPrizePool = 0; // TODO Don't do this here
+        bonusPrizePool = 0; // TODO Don't do this here
 
         // If any of these values have been changed by the operator, update them now before starting the next lottery.
         currentLotteryBlockDuration = lotteryBlockDuration;
@@ -274,6 +269,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
         lotteryNumber++;
         lotteryBlockStart = block.number;
+        currentTicketNumber = 0;
 
         chainlinkRequestIdSet = false;
         winningTicketSet = false;
@@ -283,8 +279,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function endCurrentLottery() private {
         // End the current lottery, credit any prizes rewarded, and then start a new lottery.
-        requireWinningTicket();
-
         address winningAddress;
         uint operatorPrize;
         uint winnerPrize;
@@ -299,7 +293,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
         else {
             // Give the lottery operator their cut of the pot, and then give the rest to the randomly chosen winner.
-            winningAddress = map_ticket2Address[winningTicket];
+            winningAddress = findWinningAddress(winningTicket);
             operatorPrize = playerPrizePool * operatorCut / 100;
             winnerPrize = playerPrizePool + bonusPrizePool - operatorPrize;
         }
@@ -312,16 +306,29 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         startNewLottery();
     }
 
-    function cancelCurrentLottery() private {
-        // Refund everyone and then start a new lottery. All refunds will be accounted for as claimable balances.
-        // To avoid double counting and to keep things simple, we refund each ticket one at a time.
-        for(uint i = 0; i < currentTicketNumber; i++) {
-            addAddressClaimableBalance(map_ticket2Address[i], currentTicketPrice);
+    function findWinningAddress(uint ticket) private view returns (address) {
+        // Because "map_ticket2Address" may have gaps, we must search until we find the winning address.
+        address winningAddress;
+
+        while(winningAddress == address(0) && ticket > 0) {
+            winningAddress = map_ticket2Address[ticket--];
         }
 
+        return winningAddress;
+    }
+
+    function cancelCurrentLottery(uint value) private {
+        // Mark the current lottery as refundable and start a new lottery.
+        map_lotteryNum2IsRefundable[lotteryNumber] = true;
         emit LotteryCancel(lotteryNumber, lotteryBlockStart);
 
+        // Move funds in the player prize pool to the refund pool. Players who have purchased tickets may request a refund manually.
+        addRefundPool(getPlayerPrizePool());
+
+        // Carry over the existing bonus prize pool and add in the penalty value.
+        uint currentBonusPrizePool = bonusPrizePool;
         startNewLottery();
+        addBonusPrizePool(currentBonusPrizePool + value);
     }
 
     function isLotteryActive() private view returns (bool) {
@@ -347,7 +354,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function totalAddressTickets(address _address) private view returns (uint) {
-        return map_address2NumTickets[_address];
+        return map_lotteryNum2Address2NumTickets[lotteryNumber][_address];
     }
 
     function totalTickets() private view returns (uint) {
@@ -367,7 +374,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function isAddressPlaying(address _address) private view returns (bool) {
-        return map_address2NumTickets[_address] != 0;
+        return map_lotteryNum2Address2NumTickets[lotteryNumber][_address] != 0;
     }
 
     function setLotteryBlockDuration(uint newLotteryBlockDuration) private {
@@ -537,7 +544,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function addPlayerPrizePool(uint value) private {
-        // Add funds to the player prize pool.
         playerPrizePool += value;
     }
 
@@ -546,12 +552,19 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function addBonusPrizePool(uint value) private {
-        // Add funds to the bonus prize pool.
         bonusPrizePool += value;
     }
 
     function getBonusPrizePool() private view returns (uint) {
         return bonusPrizePool;
+    }
+
+    function addRefundPool(uint value) private {
+        refundPool += value;
+    }
+
+    function getRefundPool() private view returns (uint) {
+        return refundPool;
     }
 
     function getAccountedContractBalance() private view returns (uint) {
@@ -575,8 +588,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function withdrawAddressClaimableBalance(address _address) private {
-        // We only allow the entire balance to be claimed.
-        uint balance = map_address2ClaimableBalance[_address];
+        // We only allow the entire balance to be withdrawn.
+        uint balance = getAddressClaimableBalance(_address);
 
         map_address2ClaimableBalance[_address] = 0;
         claimableBalancePool -= balance;
@@ -586,6 +599,26 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function getAddressClaimableBalance(address _address) private view returns (uint) {
         return map_address2ClaimableBalance[_address];
+    }
+
+    function withdrawAddressRefund(uint _lotteryNumber, address _address) private {
+        // We only allow the entire balance to be withdrawn.
+        uint balance = getAddressRefund(_lotteryNumber, _address);
+
+        map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] = 0;
+        refundPool -= balance;
+
+        transferToAddress(_address, balance);
+    }
+
+    function getAddressRefund(uint _lotteryNumber, address _address) private view returns (uint) {
+        if(map_lotteryNum2IsRefundable[_lotteryNumber]) {
+            return map_lotteryNum2Address2NumTickets[_lotteryNumber][_address];
+        }
+        else {
+            // The lottery was not canceled so no one can get a refund.
+            return 0;
+        }
     }
 
     /*
@@ -715,12 +748,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requireOperatorAddress(msg.sender);
         requirePenaltyPayment(msg.value);
         
-        cancelCurrentLottery();
+        cancelCurrentLottery(msg.value);
 
         lock_end();
     }
 
-    
     /// @notice The operator can call this to withdraw an amount of the contract funds.
     /// @param value The amounts of contract funds to withdraw.
     function action_withdrawContractFunds(uint value) external {
@@ -812,7 +844,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock_end();
     }
 
-    /// @notice The operator can trigger a claimable balance withdraw for someone else. This can be used to send funds to winners who do not know how to withdraw themselves.
+    /// @notice The operator can trigger a claimable balance withdraw for someone else.
     /// @param _address The address that the operator is triggering the claimable balance withdraw for.
     function action_withdrawOtherAddressClaimableBalance(address _address) external {
         lock_start();
@@ -820,6 +852,29 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requireOperatorAddress(msg.sender);
 
         withdrawAddressClaimableBalance(_address);
+
+        lock_end();
+    }
+
+    /// @notice Anyone can call this to withdraw a refund.
+    /// @param _lotteryNumber The number of a lottery that was canceled.
+    function action_withdrawAddressRefund(uint _lotteryNumber) external {
+        lock_start();
+
+        withdrawAddressRefund(_lotteryNumber, msg.sender);
+
+        lock_end();
+    }
+
+    /// @notice The operator can trigger a refund withdraw for someone else.
+    /// @param _lotteryNumber The number of a lottery that was canceled.
+    /// @param _address The address that the operator is triggering the refund withdraw for.
+    function action_withdrawOtherAddressClaimableBalance(uint _lotteryNumber, address _address) external {
+        lock_start();
+
+        requireOperatorAddress(msg.sender);
+
+        withdrawAddressRefund(_lotteryNumber, _address);
 
         lock_end();
     }
@@ -866,6 +921,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @return The claimable balance of the address.
     function query_getAddressClaimableBalance(address _address) external view returns (uint) {
         return getAddressClaimableBalance(_address);
+    }
+
+    /// @notice Returns the refund an address is entitled to.
+    /// @param _lotteryNumber The number of a lottery that was canceled.
+    /// @param _address The address that we are checking the refund for.
+    /// @return The claimable balance of the address.
+    function query_getAddressRefund(uint _lotteryNumber, address _address) external view returns (uint) {
+        return getAddressRefund(_lotteryNumber, _address);
     }
 
     /// @notice Returns whether the address is playing in the current lottery.
