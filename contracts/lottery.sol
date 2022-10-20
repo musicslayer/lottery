@@ -1196,17 +1196,24 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice The owner can call this to get information about the internal state of the contract.
-    function diagnostic_getInternalInfo1() external view returns (uint _operatorCut, uint _maxTicketPurchase, bool _lockFlag, uint _lotteryNumber, uint _lotteryBlockStart, uint _lotteryBlockDuration, uint _currentLotteryBlockDuration, address _ownerAddress, address _operatorAddress, uint _ticketPrice, uint _currentTicketPrice, uint _contractFunds) {
+    function diagnostic_getInternalInfo1() external view returns (uint _operatorCut, uint _maxTicketPurchase, bool _lockFlag, bool _corruptContractFlag, uint _corruptContractBlock, uint _corruptContractGracePeriodBlocks, uint _lotteryNumber, uint _lotteryBlockStart, uint _lotteryBlockDuration, uint _currentLotteryBlockDuration, address _ownerAddress, address _operatorAddress) {
         requireOwnerAddress(msg.sender);
 
-        return(operatorCut, maxTicketPurchase, lockFlag, lotteryNumber, lotteryBlockStart, lotteryBlockDuration, currentLotteryBlockDuration, ownerAddress, operatorAddress, ticketPrice, currentTicketPrice, contractFunds);
+        return(operatorCut, maxTicketPurchase, lockFlag, corruptContractFlag, corruptContractBlock, corruptContractGracePeriodBlocks, lotteryNumber, lotteryBlockStart, lotteryBlockDuration, currentLotteryBlockDuration, ownerAddress, operatorAddress);
     }
 
     /// @notice The owner can call this to get information about the internal state of the contract.
-    function diagnostic_getInternalInfo2() external view returns (uint _playerPrizePool, uint _bonusPrizePool, uint _claimableBalancePool, uint _refundPool, uint _currentTicketNumber, bool _chainlinkRequestIdFlag, uint _chainlinkRequestIdBlock, uint _chainlinkRequestIdLotteryNumber, uint _chainlinkRequestId, bool _winningTicketFlag, uint _winningTicket) {
+    function diagnostic_getInternalInfo2() external view returns (uint _ticketPrice, uint _currentTicketPrice, uint _contractFunds, uint _playerPrizePool, uint _bonusPrizePool, uint _claimableBalancePool, uint _refundPool, uint _currentTicketNumber, uint _chainlinkRetryCounter, uint _chainlinkRetryMax, bool _chainlinkRequestIdFlag, uint _chainlinkRequestIdBlock) {
         requireOwnerAddress(msg.sender);
 
-        return(playerPrizePool, bonusPrizePool, claimableBalancePool, refundPool, currentTicketNumber, chainlinkRequestIdFlag, chainlinkRequestIdBlock, chainlinkRequestIdLotteryNumber, chainlinkRequestId, winningTicketFlag, winningTicket);
+        return(ticketPrice, currentTicketPrice, contractFunds, playerPrizePool, bonusPrizePool, claimableBalancePool, refundPool, currentTicketNumber, chainlinkRetryCounter, chainlinkRetryMax, chainlinkRequestIdFlag, chainlinkRequestIdBlock);
+    }
+
+    /// @notice The owner can call this to get information about the internal state of the contract.
+    function diagnostic_getInternalInfo3() external view returns (uint _chainlinkRequestIdLotteryNumber, uint _chainlinkRequestId, bool _winningTicketFlag, uint _winningTicket) {
+        requireOwnerAddress(msg.sender);
+
+        return(chainlinkRequestIdLotteryNumber, chainlinkRequestId, winningTicketFlag, winningTicket);
     }
 
     /// @notice The owner can call this to unlock the contract.
