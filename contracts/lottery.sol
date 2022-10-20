@@ -2,7 +2,9 @@
 
 pragma solidity >=0.8.12 <0.9.0;
 
-// The lottery contract is NOT a token. We only use this interface so that any tokens sent to this contract can be accessed.
+// The lottery contract is NOT a token. We only use the IERC20 interface so that any tokens sent to this contract can be accessed.
+
+// import "@openzeppelin/contracts/token/ERC20/IERC20.sol"
 interface IERC20 {
     function totalSupply() external view returns (uint256);
     function balanceOf(address account) external view returns (uint256);
@@ -116,7 +118,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     error CorruptContractError();
 
     /// @notice The self-destruct is not ready.
-    error SelfdestructNotReadyError();
+    error SelfDestructNotReadyError();
 
     /// @notice A record of the owner address changing.
     event OwnerChanged(address indexed oldOwnerAddress, address indexed newOwnerAddress);
@@ -602,6 +604,36 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return address(this).balance;
     }
 
+    function getTokenBalance(address tokenContractAddress) private view returns (uint) {
+        IERC20 tokenContract = IERC20(tokenContractAddress);
+        return tokenContract.balanceOf(address(this));
+    }
+
+    function withdrawTokenBalance(address tokenContractAddress, address _address) private {
+        // For Chainlink, we honor the minimum reserve requirement. For any other token, just withdraw the entire balance.
+        IERC20 tokenContract = IERC20(tokenContractAddress);
+        uint tokenBalance = tokenContract.balanceOf(address(this));
+
+        if(tokenContractAddress == chainlinkAddress) {
+            if(tokenBalance >= chainlinkMinimumReserve) {
+                tokenBalance -= chainlinkMinimumReserve;
+            }
+            else {
+                revert ChainlinkMinimumReserveError(chainlinkMinimumReserve);
+            }
+        }
+
+        //tokenContract.transfer(_address, tokenBalance);
+
+        // Take extra care to account for tokens that don't revert on failure or that don't return a value.
+        // A return value is optional, but if it is present then it must be true.
+        bytes memory callData = abi.encodeWithSelector(tokenContract.transfer.selector, _address, tokenBalance);
+        (bool success, bytes memory returnData) = tokenContractAddress.call(callData);
+        if(!success || (returnData.length > 0 && !abi.decode(returnData, (bool)))) {
+            revert("SafeERC20: low-level call failed");
+        }
+    }
+
     function getAccountedContractBalance() private view returns (uint) {
         return contractFunds + playerPrizePool + bonusPrizePool + claimableBalancePool + refundPool;
     }
@@ -748,31 +780,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function transferToAddress(address _address, uint value) private {
-        // The caller is responsible for making sure that the address is actually payable.
         payable(_address).transfer(value);
     }
 
-    function getTokenBalance(address tokenContractAddress) private view returns (uint) {
-        IERC20 tokenContract = IERC20(tokenContractAddress);
-        return tokenContract.balanceOf(address(this));
-    }
-
-    function withdrawTokenBalance(address tokenContractAddress, address _address) private {
-        // For Chainlink, we honor the minimum reserve requirement. For any other token, just withdraw the entire balance.
-        IERC20 tokenContract = IERC20(tokenContractAddress);
-        uint tokenBalance = tokenContract.balanceOf(address(this));
-
-        if(tokenContractAddress == chainlinkAddress) {
-            if(tokenBalance >= chainlinkMinimumReserve) {
-                tokenBalance -= chainlinkMinimumReserve;
-            }
-            else {
-                revert ChainlinkMinimumReserveError(chainlinkMinimumReserve);
-            }
-        }
-
-        tokenContract.transfer(_address, tokenBalance);
-    }
+    /*
+        Self-Destruct Functions
+    */
 
     function isCorruptContract() private view returns (bool) {
         return corruptContractFlag;
@@ -816,7 +829,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return getRemainingCorruptContractGracePeriodBlocks() > 0;
     }
 
-    function isSelfdestructReady() private view returns (bool) {
+    function isSelfDestructReady() private view returns (bool) {
         // If this function returns true, the owner is allowed to call "selfdestruct" and withdraw the entire contract balance.
         // To ensure the owner cannot just run away with prize money, we require all of the following to be true:
         // -> The contract must be corrupt.
@@ -824,10 +837,15 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return isCorruptContract() && !isCorruptContractGracePeriod();
     }
 
-    function requireSelfdestructReady() private view {
-        if(!isSelfdestructReady()) {
-            revert SelfdestructNotReadyError();
+    function requireSelfDestructReady() private view {
+        if(!isSelfDestructReady()) {
+            revert SelfDestructNotReadyError();
         }
+    }
+
+    function selfDestruct(address _address) private {
+        // Destroy this contract and give any balance to the address.
+        selfdestruct(payable(_address));
     }
 
     /*
@@ -864,12 +882,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return isCorruptContract();
     }
 
-    /// @notice Returns the remaining grace period blocks. This value is meaningless unless the contract is corrupt.
-    /// @return The remaining grace period blocks.
-    function query_getRemainingCorruptContractGracePeriodBlocks() external view returns (uint) {
-        return getRemainingCorruptContractGracePeriodBlocks();
-    }
-
     /// @notice Returns whether we are in the corrupt contract grace period. This value is meaningless unless the contract is corrupt.
     /// @return Whether we are in the corrupt contract grace period.
     function query_isCorruptContractGracePeriod() external view returns (bool) {
@@ -878,42 +890,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice Returns whether the self-destruct is ready.
     /// @return Whether the self-destruct is ready.
-    function query_isSelfdestructReady() external view returns (bool) {
-        return isSelfdestructReady();
-    }
-
-    /// @notice Returns the entire contract balance. This includes all funds, even those that are unaccounted for.
-    /// @return The entire contract balance.
-    function query_getContractBalance() external view returns (uint) {
-        return getContractBalance();
-    }
-
-    /// @notice Returns the number of tickets an address has in the current lottery.
-    /// @param _address The address that we are checking the number of tickets for.
-    /// @return The number of tickets the address has in the current lottery.
-    function query_totalAddressTickets(address _address) external view returns (uint) {
-        return totalAddressTickets(_address);
-    }
-
-    /// @notice Returns the total number of tickets in the current lottery.
-    /// @return The total number of tickets in the current lottery.
-    function query_totalTickets() external view returns (uint) {
-        return totalTickets();
-    }
-
-    /// @notice Returns the claimable balance of the address.
-    /// @param _address The address that we are checking the claimable balance for.
-    /// @return The claimable balance of the address.
-    function query_getAddressClaimableBalance(address _address) external view returns (uint) {
-        return getAddressClaimableBalance(_address);
-    }
-
-    /// @notice Returns the refund an address is entitled to.
-    /// @param _lotteryNumber The number of a lottery that was canceled.
-    /// @param _address The address that we are checking the refund for.
-    /// @return The claimable balance of the address.
-    function query_getAddressRefund(uint _lotteryNumber, address _address) external view returns (uint) {
-        return getAddressRefund(_lotteryNumber, _address);
+    function query_isSelfDestructReady() external view returns (bool) {
+        return isSelfDestructReady();
     }
 
     /// @notice Returns whether the address is playing in the current lottery.
@@ -923,104 +901,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return isAddressPlaying(_address);
     }
 
-    /// @notice Returns the predicted number of times that the address will win out of 100 times, truncated to an integer. This is equivalent to the percentage probability of the address winning.
-    /// @param _address The address that we are checking the win chance for.
-    /// @return The predicted number of times that the address will win out of 100 times.
-    function query_addressWinChance(address _address) external view returns (uint) {
-        return totalAddressTickets(_address) * 100 / totalTickets();
-    }
-
-    /// @notice Returns the predicted number of times that the address will win out of N times, truncated to an integer. This function can be used to get extra digits in the answer that would normally get truncated.
-    /// @param _address The address that we are checking the win chance for.
-    /// @param N The total number of times that we want to know how many times the address will win out of.
-    /// @return The predicted number of times that the address will win out of N times.
-    function query_addressWinChanceOutOf(address _address, uint N) external view returns (uint) {
-        return totalAddressTickets(_address) * N / totalTickets();
-    }
-
     /// @notice Returns whether the current lottery is active or not.
     /// @return Whether the current lottery is active or not.
     function query_isLotteryActive() external view returns (bool) {
         return isLotteryActive();
-    }
-
-    /// @notice Returns the current owner address.
-    /// @return The current owner address.
-    function query_getOwnerAddress() external view returns (address) {
-        return getOwnerAddress();
-    }
-
-    /// @notice Returns the current operator address.
-    /// @return The current operator address.
-    function query_getOperatorAddress() external view returns (address) {
-        return getOperatorAddress();
-    }
-
-    /// @notice Returns the amount of funds accounted for as contract funds. Note that the actual contract balance may be higher.
-    /// @return The amount of contract funds.
-    function query_getContractFunds() external view returns (uint) {
-        return getContractFunds();
-    }
-
-    /// @notice Returns the player prize pool. This is the amount of funds used to purchase tickets in the current lottery.
-    /// @return The player prize pool.
-    function query_getPlayerPrizePool() external view returns (uint) {
-        return getPlayerPrizePool();
-    }
-
-    /// @notice Returns the bonus prize pool. This is the amount of bonus funds that anyone can donate to "sweeten the pot".
-    /// @return The bonus prize pool.
-    function query_getBonusPrizePool() external view returns (uint) {
-        return getBonusPrizePool();
-    }
-
-    /// @notice Returns the claimable balance pool. This is the total amount of funds that can currently be claimed.
-    /// @return The claimable balance pool.
-    function query_getClaimableBalancePool() external view returns (uint) {
-        return getClaimableBalancePool();
-    }
-
-    /// @notice Returns the refund pool. This is the total amount of funds that can currently be refunded from canceled lotteries.
-    /// @return The refund pool.
-    function query_getRefundPool() external view returns (uint) {
-        return getRefundPool();
-    }
-
-    /// @notice Returns the current lottery number.
-    /// @return The current lottery number.
-    function query_getLotteryNumber() external view returns (uint) {
-        return getLotteryNumber();
-    }
-
-    /// @notice Returns the start block number of the current lottery
-    /// @return The start block number of the current lottery
-    function query_getLotteryBlockNumberStart() external view returns (uint) {
-        return getLotteryBlockNumberStart();
-    }
-
-    /// @notice Returns the total number of active blocks for the current lottery.
-    /// @return The total number of active blocks for the current lottery.
-    function query_getLotteryActiveBlocks() external view returns (uint) {
-        return getLotteryActiveBlocks();
-    }
-
-    /// @notice Returns the remaining number of active blocks for the current lottery.
-    /// @return The remaining number of active blocks for the current lottery.
-    function query_getRemainingLotteryActiveBlocks() external view returns (uint) {
-        return getRemainingLotteryActiveBlocks();
-    }
-
-    /// @notice Returns the ticket price of the current lottery.
-    /// @return The ticket price of the current lottery.
-    function query_getTicketPrice() external view returns (uint) {
-        return getTicketPrice();
-    }
-
-    /// @notice Returns the balance of a token.
-    /// @param tokenContractAddress The address where the token's contract lives.
-    /// @return The token balance.
-    function query_getTokenBalance(address tokenContractAddress) external view returns (uint) {
-        return getTokenBalance(tokenContractAddress);
     }
 
     /// @notice Returns whether a winning ticket has been drawn for the current lottery.
@@ -1029,19 +913,164 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return isWinningTicketDrawn();
     }
 
+    
+
+
+
+
+
+//////////////////////////////////////////////
+
+    /// @notice Returns the remaining grace period blocks. This value is meaningless unless the contract is corrupt.
+    /// @return The remaining grace period blocks.
+    function get_remainingCorruptContractGracePeriodBlocks() external view returns (uint) {
+        return getRemainingCorruptContractGracePeriodBlocks();
+    }
+
+    /// @notice Returns the entire contract balance. This includes all funds, even those that are unaccounted for.
+    /// @return The entire contract balance.
+    function get_contractBalance() external view returns (uint) {
+        return getContractBalance();
+    }
+
+    /// @notice Returns the number of tickets an address has in the current lottery.
+    /// @param _address The address that we are checking the number of tickets for.
+    /// @return The number of tickets the address has in the current lottery.
+    function get_totalAddressTickets(address _address) external view returns (uint) {
+        return totalAddressTickets(_address);
+    }
+
+    /// @notice Returns the total number of tickets in the current lottery.
+    /// @return The total number of tickets in the current lottery.
+    function get_totalTickets() external view returns (uint) {
+        return totalTickets();
+    }
+
+    /// @notice Returns the claimable balance of the address.
+    /// @param _address The address that we are checking the claimable balance for.
+    /// @return The claimable balance of the address.
+    function get_addressClaimableBalance(address _address) external view returns (uint) {
+        return getAddressClaimableBalance(_address);
+    }
+
+    /// @notice Returns the refund an address is entitled to.
+    /// @param _lotteryNumber The number of a lottery that was canceled.
+    /// @param _address The address that we are checking the refund for.
+    /// @return The claimable balance of the address.
+    function get_addressRefund(uint _lotteryNumber, address _address) external view returns (uint) {
+        return getAddressRefund(_lotteryNumber, _address);
+    }
+
+    /// @notice Returns the predicted number of times that the address will win out of 100 times, truncated to an integer. This is equivalent to the percentage probability of the address winning.
+    /// @param _address The address that we are checking the win chance for.
+    /// @return The predicted number of times that the address will win out of 100 times.
+    function get_addressWinChance(address _address) external view returns (uint) {
+        return totalAddressTickets(_address) * 100 / totalTickets();
+    }
+
+    /// @notice Returns the predicted number of times that the address will win out of N times, truncated to an integer. This function can be used to get extra digits in the answer that would normally get truncated.
+    /// @param _address The address that we are checking the win chance for.
+    /// @param N The total number of times that we want to know how many times the address will win out of.
+    /// @return The predicted number of times that the address will win out of N times.
+    function get_addressWinChanceOutOf(address _address, uint N) external view returns (uint) {
+        return totalAddressTickets(_address) * N / totalTickets();
+    }
+
+    /// @notice Returns the current owner address.
+    /// @return The current owner address.
+    function get_ownerAddress() external view returns (address) {
+        return getOwnerAddress();
+    }
+
+    /// @notice Returns the current operator address.
+    /// @return The current operator address.
+    function get_operatorAddress() external view returns (address) {
+        return getOperatorAddress();
+    }
+
+    /// @notice Returns the amount of funds accounted for as contract funds. Note that the actual contract balance may be higher.
+    /// @return The amount of contract funds.
+    function get_contractFunds() external view returns (uint) {
+        return getContractFunds();
+    }
+
+    /// @notice Returns the player prize pool. This is the amount of funds used to purchase tickets in the current lottery.
+    /// @return The player prize pool.
+    function get_playerPrizePool() external view returns (uint) {
+        return getPlayerPrizePool();
+    }
+
+    /// @notice Returns the bonus prize pool. This is the amount of bonus funds that anyone can donate to "sweeten the pot".
+    /// @return The bonus prize pool.
+    function get_bonusPrizePool() external view returns (uint) {
+        return getBonusPrizePool();
+    }
+
+    /// @notice Returns the claimable balance pool. This is the total amount of funds that can currently be claimed.
+    /// @return The claimable balance pool.
+    function get_claimableBalancePool() external view returns (uint) {
+        return getClaimableBalancePool();
+    }
+
+    /// @notice Returns the refund pool. This is the total amount of funds that can currently be refunded from canceled lotteries.
+    /// @return The refund pool.
+    function get_refundPool() external view returns (uint) {
+        return getRefundPool();
+    }
+
+    /// @notice Returns the current lottery number.
+    /// @return The current lottery number.
+    function get_lotteryNumber() external view returns (uint) {
+        return getLotteryNumber();
+    }
+
+    /// @notice Returns the start block number of the current lottery
+    /// @return The start block number of the current lottery
+    function get_lotteryBlockNumberStart() external view returns (uint) {
+        return getLotteryBlockNumberStart();
+    }
+
+    /// @notice Returns the total number of active blocks for the current lottery.
+    /// @return The total number of active blocks for the current lottery.
+    function get_lotteryActiveBlocks() external view returns (uint) {
+        return getLotteryActiveBlocks();
+    }
+
+    /// @notice Returns the remaining number of active blocks for the current lottery.
+    /// @return The remaining number of active blocks for the current lottery.
+    function get_remainingLotteryActiveBlocks() external view returns (uint) {
+        return getRemainingLotteryActiveBlocks();
+    }
+
+    /// @notice Returns the ticket price of the current lottery.
+    /// @return The ticket price of the current lottery.
+    function get_ticketPrice() external view returns (uint) {
+        return getTicketPrice();
+    }
+
+    /// @notice Returns the balance of a token.
+    /// @param tokenContractAddress The address where the token's contract lives.
+    /// @return The token balance.
+    function get_tokenBalance(address tokenContractAddress) external view returns (uint) {
+        return getTokenBalance(tokenContractAddress);
+    }
+
     /// @notice Returns the winning address of a lottery.
     /// @param _lotteryNumber The number of a lottery that has already finished.
     /// @return The address that won the lottery.
-    function query_getLotteryWinningAddress(uint _lotteryNumber) private view returns (address) {
+    function get_lotteryWinningAddress(uint _lotteryNumber) external view returns (address) {
         return getLotteryWinningAddress(_lotteryNumber);
     }
 
     /// @notice Returns the winner's prize of a lottery.
     /// @param _lotteryNumber The number of a lottery that has already finished.
     /// @return The prize that was won for the lottery.
-    function query_getLotteryWinnerPrize(uint _lotteryNumber) private view returns (uint) {
+    function get_lotteryWinnerPrize(uint _lotteryNumber) external view returns (uint) {
         return getLotteryWinnerPrize(_lotteryNumber);
     }
+
+
+///////////////////////////////////////////////////////////////////////////////
 
     /// @notice The operator can call this to give funds to the contract.
     function action_addContractFunds() external payable {
@@ -1135,61 +1164,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock_end();
     }
 
-    /// @notice The owner can transfer ownership to a new address.
-    /// @param newOwnerAddress The new owner address.
-    function action_setOwnerAddress(address newOwnerAddress) external {
-        lock_start();
-
-        requireOwnerAddress(msg.sender);
-
-        setOwnerAddress(newOwnerAddress);
-
-        lock_end();
-    }
-
-    /// @notice The operator can assign the operator role to a new address.
-    /// @param newOperatorAddress The new operator address.
-    function action_setOperatorAddress(address newOperatorAddress) external {
-        lock_start();
-
-        requireOperatorAddress(msg.sender);
-
-        setOperatorAddress(newOperatorAddress);
-
-        lock_end();
-    }
-
     /// @notice The owner can call this to make themselves the operator.
-    function action_setOperatorAddressToOwner() external {
+    function action_takeOperatorAddress() external {
         lock_start();
 
         requireOwnerAddress(msg.sender);
 
         setOperatorAddress(msg.sender);
-
-        lock_end();
-    }
-
-    /// @notice The operator can change the total number of active blocks for the lottery. This change will go into effect starting from the next lottery.
-    /// @param newLotteryActiveBlocks The new total number of active blocks for the lottery.
-    function action_setLotteryActiveBlocks(uint newLotteryActiveBlocks) external {
-        lock_start();
-
-        requireOperatorAddress(msg.sender);
-
-        setLotteryActiveBlocks(newLotteryActiveBlocks);
-
-        lock_end();
-    }
-
-    /// @notice The operator can change the ticket price of the lottery. This change will go into effect starting from the next lottery.
-    /// @param newTicketPrice The new ticket price of the lottery.
-    function action_setTicketPrice(uint newTicketPrice) external {
-        lock_start();
-
-        requireOperatorAddress(msg.sender);
-
-        setTicketPrice(newTicketPrice);
 
         lock_end();
     }
@@ -1250,6 +1231,66 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock_end();
     }
 
+
+
+
+
+
+
+
+
+    /// @notice The owner can transfer ownership to a new address.
+    /// @param newOwnerAddress The new owner address.
+    function set_ownerAddress(address newOwnerAddress) external {
+        lock_start();
+
+        requireOwnerAddress(msg.sender);
+
+        setOwnerAddress(newOwnerAddress);
+
+        lock_end();
+    }
+
+    /// @notice The operator can assign the operator role to a new address.
+    /// @param newOperatorAddress The new operator address.
+    function set_operatorAddress(address newOperatorAddress) external {
+        lock_start();
+
+        requireOperatorAddress(msg.sender);
+
+        setOperatorAddress(newOperatorAddress);
+
+        lock_end();
+    }
+
+    
+
+    /// @notice The operator can change the total number of active blocks for the lottery. This change will go into effect starting from the next lottery.
+    /// @param newLotteryActiveBlocks The new total number of active blocks for the lottery.
+    function set_lotteryActiveBlocks(uint newLotteryActiveBlocks) external {
+        lock_start();
+
+        requireOperatorAddress(msg.sender);
+
+        setLotteryActiveBlocks(newLotteryActiveBlocks);
+
+        lock_end();
+    }
+
+    /// @notice The operator can change the ticket price of the lottery. This change will go into effect starting from the next lottery.
+    /// @param newTicketPrice The new ticket price of the lottery.
+    function set_ticketPrice(uint newTicketPrice) external {
+        lock_start();
+
+        requireOperatorAddress(msg.sender);
+
+        setTicketPrice(newTicketPrice);
+
+        lock_end();
+    }
+
+    
+
     /// @notice The owner can call this to get information about the internal state of the contract.
     function diagnostic_getInternalInfo1() external view returns (uint _operatorCut, uint _maxTicketPurchase, bool _lockFlag, bool _corruptContractFlag, uint _corruptContractBlockNumber, uint _corruptContractGracePeriodBlocks, uint _lotteryNumber, uint _lotteryBlockNumberStart, uint _lotteryActiveBlocks, uint _currentLotteryActiveBlocks, address _ownerAddress, address _operatorAddress) {
         requireOwnerAddress(msg.sender);
@@ -1288,8 +1329,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice The owner can call this to destroy a corrupt contract.
     function failsafe_selfdestruct() external {
         requireOwnerAddress(msg.sender);
-        requireSelfdestructReady();
+        requireSelfDestructReady();
 
-        setLocked(false);
+        selfDestruct(msg.sender);
     }
 }
