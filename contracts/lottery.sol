@@ -136,6 +136,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice A record of a winning ticket being drawn.
     event WinningTicketDrawn(uint indexed winningTicket, uint indexed totalTickets);
 
+    /// @notice A record of the contract becoming corrupt.
+    event Corruption(uint indexed blockNumber);
+
+    /// @notice A record of the contract becoming uncorrupt.
+    event CorruptionReset(uint indexed blockNumber);
+
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     // Note that the player always receives the entire "bonusPrizePool" amount.
     uint private constant operatorCut = 10;
@@ -213,6 +219,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     uint32 private constant chainlinkCallbackGasLimit = 100000; // This was chosen experimentally.
     uint16 private constant chainlinkRequestConfirmationBlocks = 200; // About 10 minutes. Use the maximum allowed value of 200 blocks to be extra secure.
     uint16 private constant chainlinkRequestRetryBlocks = 600; // About 30 minutes. If we request a random number but don't get it after 600 blocks, we can make a new request.
+
+    uint private chainlinkRetryCounter;
+    uint private constant chainlinkRetryMax = 10;
 
     bool private chainlinkRequestIdFlag;
     uint private chainlinkRequestIdBlock;
@@ -299,6 +308,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
         lotteryNumber++;
         lotteryBlockStart = block.number;
+
+        chainlinkRetryCounter = 0;
 
         chainlinkRequestIdFlag = false;
         winningTicketFlag = false;
@@ -483,6 +494,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         if(winningTicketFlag || (chainlinkRequestIdFlag && !isRetryPermitted())) {
             revert DrawWinningTicketError();
         }
+
+        // At a certain point we must conclude that Chainlink is down and give up. Don't allow for additional attempts because they cost Chainlink token.
+        if(chainlinkRetryCounter > chainlinkRetryMax) {
+            setCorruptContract(true);
+            return;
+        }
+
+        chainlinkRetryCounter++;
 
         chainlinkRequestIdFlag = true;
         chainlinkRequestIdBlock = block.number;
@@ -752,15 +771,19 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function setCorruptContract(bool _isCorruptContract) private {
         if(_isCorruptContract) {
-            // Do not allow "isCorruptBlock" to keep increasing.
+            // Do not allow "isCorruptBlock" to keep increasing or multiple events to be issued.
             if(!corruptContractFlag) {
                 corruptContractFlag = true;
                 corruptContractBlock = block.number;
+
+                emit Corruption(block.number);
             }
         }
         else {
             corruptContractFlag = false;
             corruptContractBlock = 0;
+
+            emit CorruptionReset(block.number);
         }
     }
 
