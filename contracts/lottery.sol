@@ -2,7 +2,7 @@
 
 pragma solidity >=0.8.12 <0.9.0;
 
-// The lottery contract is NOT a token. We only use the IERC20 interface so that any tokens sent to this contract can be accessed.
+// The lottery contract is not a token. We only use the IERC20 interface so that any tokens sent to this contract can be accessed.
 
 // import "@openzeppelin/contracts/token/ERC20/IERC20.sol"
 interface IERC20 {
@@ -86,6 +86,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice This contract does not have the funds requested.
     error InsufficientFundsError(uint requestedValue, uint contractBalance);
+
+    /// @notice The token contract could not be found.
+    error TokenContractError(address tokenContractAddress);
+
+    /// @notice The token transfer failed.
+    error TokenTransferError(address tokenContractAddress, address _address, uint requestedValue);
 
     /// @notice Withdrawing any Chainlink would violate the minimum reserve requirement.
     error ChainlinkMinimumReserveError(uint chainlinkMinimumReserve);
@@ -214,7 +220,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     // Chainlink token and VRF info.
     uint private constant chainlinkMinimumReserve = 40e18; // 40 LINK
 
-    address private constant chainlinkAddress = 0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06;
+    address private constant chainlinkTokenAddress = 0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06;
     address private constant chainlinkWrapperAddress = 0x699d428ee890d55D56d5FC6e26290f3247A762bd;
 
     uint32 private constant chainlinkCallbackGasLimit = 100000; // This was chosen experimentally.
@@ -236,7 +242,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         Contract Functions
     */
 
-    constructor(uint initialLotteryActiveBlocks, uint initialTicketPrice) VRFV2WrapperConsumerBase(chainlinkAddress, chainlinkWrapperAddress) payable {
+    constructor(uint initialLotteryActiveBlocks, uint initialTicketPrice) VRFV2WrapperConsumerBase(chainlinkTokenAddress, chainlinkWrapperAddress) payable {
         addContractFunds(msg.value);
 
         setOwnerAddress(msg.sender);
@@ -506,7 +512,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             revert DrawWinningTicketError();
         }
 
-        // At a certain point we must conclude that Chainlink is down and give up. Don't allow for additional attempts because they cost Chainlink token.
+        // At a certain point we must conclude that Chainlink is down and give up. Don't allow for additional attempts because they cost Chainlink tokens.
         if(chainlinkRetryCounter > chainlinkRetryMax) {
             setCorruptContract(true);
             return;
@@ -611,10 +617,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function withdrawTokenBalance(address tokenContractAddress, address _address) private {
         // For Chainlink, we honor the minimum reserve requirement. For any other token, just withdraw the entire balance.
-        IERC20 tokenContract = IERC20(tokenContractAddress);
-        uint tokenBalance = tokenContract.balanceOf(address(this));
+        uint tokenBalance = getTokenBalance(tokenContractAddress);
 
-        if(tokenContractAddress == chainlinkAddress) {
+        if(tokenContractAddress == chainlinkTokenAddress) {
             if(tokenBalance >= chainlinkMinimumReserve) {
                 tokenBalance -= chainlinkMinimumReserve;
             }
@@ -623,15 +628,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             }
         }
 
-        //tokenContract.transfer(_address, tokenBalance);
+        tokenTransferToAddress(tokenContractAddress, _address, tokenBalance);
+    }
 
-        // Take extra care to account for tokens that don't revert on failure or that don't return a value.
-        // A return value is optional, but if it is present then it must be true.
-        bytes memory callData = abi.encodeWithSelector(tokenContract.transfer.selector, _address, tokenBalance);
-        (bool success, bytes memory returnData) = tokenContractAddress.call(callData);
-        if(!success || (returnData.length > 0 && !abi.decode(returnData, (bool)))) {
-            revert("SafeERC20: low-level call failed");
-        }
+    function withdrawAllChainlink(address _address) private {
+        // Withdraw all Chainlink, including the minimum reserve.
+        tokenTransferToAddress(chainlinkTokenAddress, _address, getTokenBalance(chainlinkTokenAddress));
     }
 
     function getAccountedContractBalance() private view returns (uint) {
@@ -783,6 +785,21 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         payable(_address).transfer(value);
     }
 
+    function tokenTransferToAddress(address tokenContractAddress, address _address, uint value) private {
+        // Take extra care to account for tokens that don't revert on failure or that don't return a value.
+        // A return value is optional, but if it is present then it must be true.
+        if(tokenContractAddress.code.length == 0) {
+            revert TokenContractError(tokenContractAddress);
+        }
+
+        bytes memory callData = abi.encodeWithSelector(IERC20(tokenContractAddress).transfer.selector, _address, value);
+        (bool success, bytes memory returnData) = tokenContractAddress.call(callData);
+
+        if(!success || (returnData.length > 0 && !abi.decode(returnData, (bool)))) {
+            revert TokenTransferError(tokenContractAddress, _address, value);
+        }
+    }
+
     /*
         Self-Destruct Functions
     */
@@ -844,7 +861,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function selfDestruct(address _address) private {
-        // Destroy this contract and give any balance to the address.
+        // Destroy this contract and give any native coin balance to the address.
+        // The owner is responsible for withdrawing tokens before this contract is destroyed.
         selfdestruct(payable(_address));
     }
 
@@ -1093,7 +1111,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock_end();
     }
 
-    /// @notice Players can call this to buy tickets for the current lottery, but only if it is still active.
+    /// @notice Players can call this to buy tickets for the current lottery, but only if it is still active and not corrupt.
     function action_buyTickets() external payable {
         lock_start();
 
@@ -1324,6 +1342,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requireOwnerAddress(msg.sender);
 
         setCorruptContract(false);
+    }
+
+    /// @notice The owner can call this to withdraw all Chainlink, including the minimum reserve. This can only be used if the contract is ready to be destroyed.
+    function failsafe_withdrawAllChainlink() external {
+        requireOwnerAddress(msg.sender);
+        requireSelfDestructReady();
+
+        withdrawAllChainlink(msg.sender);
     }
 
     /// @notice The owner can call this to destroy a corrupt contract.
