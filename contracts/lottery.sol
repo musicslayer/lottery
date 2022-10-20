@@ -386,9 +386,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function getRemainingLotteryActiveBlocks() private view returns (uint) {
-        uint numBlocksAfterStart = block.number - lotteryBlockNumberStart;
-        if(numBlocksAfterStart <= currentLotteryActiveBlocks) {
-            return currentLotteryActiveBlocks - numBlocksAfterStart;
+        uint numBlocksPassed = block.number - lotteryBlockNumberStart;
+        if(numBlocksPassed <= currentLotteryActiveBlocks) {
+            return currentLotteryActiveBlocks - numBlocksPassed;
         }
         else {
             return 0;
@@ -802,8 +802,18 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
     }
 
-    function isGracePeriod() private view returns (bool) {
-        return block.number - corruptContractBlockNumber <= corruptContractGracePeriodBlocks;
+    function getRemainingCorruptContractGracePeriodBlocks() private view returns (uint) {
+        uint numBlocksPassed = block.number - corruptContractBlockNumber;
+        if(numBlocksPassed <= corruptContractGracePeriodBlocks) {
+            return corruptContractGracePeriodBlocks - numBlocksPassed;
+        }
+        else {
+            return 0;
+        }
+    }
+
+    function isCorruptContractGracePeriod() private view returns (bool) {
+        return getRemainingCorruptContractGracePeriodBlocks() > 0;
     }
 
     function isSelfdestructReady() private view returns (bool) {
@@ -811,7 +821,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         // To ensure the owner cannot just run away with prize money, we require all of the following to be true:
         // -> The contract must be corrupt.
         // -> After the contract became corrupt, the owner must wait for a grace period to pass. This gives everyone a chance to withdraw any funds owed to them.
-        return isCorruptContract() && !isGracePeriod();
+        return isCorruptContract() && !isCorruptContractGracePeriod();
     }
 
     function requireSelfdestructReady() private view {
@@ -826,20 +836,50 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice Returns an integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     /// @return An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
-    function query_operatorCut() external pure returns (uint) {
+    function constant_operatorCut() external pure returns (uint) {
         return operatorCut;
     }
 
     /// @notice Returns the maximum number of tickets that can be purchased in a single transaction.
     /// @return The maximum number of tickets that can be purchased in a single transaction.
-    function query_maxTicketPurchase() external pure returns (uint) {
+    function constant_maxTicketPurchase() external pure returns (uint) {
         return maxTicketPurchase;
+    }
+
+    /// @notice Returns the total grace period blocks.
+    /// @return The total grace period blocks.
+    function constant_corruptContractGracePeriodBlocks() external pure returns (uint) {
+        return corruptContractGracePeriodBlocks;
     }
 
     /// @notice Returns whether the contract is currently locked.
     /// @return Whether the contract is currently locked.
     function query_isLocked() external view returns (bool) {
         return isLocked();
+    }
+
+    /// @notice Returns whether the contract is currently corrupt.
+    /// @return Whether the contract is currently corrupt.
+    function query_isCorruptContract() external view returns (bool) {
+        return isCorruptContract();
+    }
+
+    /// @notice Returns the remaining grace period blocks. This value is meaningless unless the contract is corrupt.
+    /// @return The remaining grace period blocks.
+    function query_getRemainingCorruptContractGracePeriodBlocks() external view returns (uint) {
+        return getRemainingCorruptContractGracePeriodBlocks();
+    }
+
+    /// @notice Returns whether we are in the corrupt contract grace period. This value is meaningless unless the contract is corrupt.
+    /// @return Whether we are in the corrupt contract grace period.
+    function query_isCorruptContractGracePeriod() external view returns (bool) {
+        return isCorruptContractGracePeriod();
+    }
+
+    /// @notice Returns whether the self-destruct is ready.
+    /// @return Whether the self-destruct is ready.
+    function query_isSelfdestructReady() external view returns (bool) {
+        return isSelfdestructReady();
     }
 
     /// @notice Returns the entire contract balance. This includes all funds, even those that are unaccounted for.
