@@ -264,7 +264,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         else {
             requireLotteryActive();
             requireNotCorruptContract();
-            requirePlayerAddress(msg.sender);
 
             buyTickets(msg.sender, msg.value);
         }
@@ -826,6 +825,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
     }
 
+    function requireCorruptContract() private view {
+        if(!isCorruptContract()) {
+            revert NotCorruptContractError();
+        }
+    }
+
     function requireNotCorruptContract() private view {
         if(isCorruptContract()) {
             revert CorruptContractError();
@@ -930,14 +935,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function query_isWinningTicketDrawn() external view returns (bool) {
         return isWinningTicketDrawn();
     }
-
-    
-
-
-
-
-
-//////////////////////////////////////////////
 
     /// @notice Returns the remaining grace period blocks. This value is meaningless unless the contract is corrupt.
     /// @return The remaining grace period blocks.
@@ -1087,9 +1084,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return getLotteryWinnerPrize(_lotteryNumber);
     }
 
-
-///////////////////////////////////////////////////////////////////////////////
-
     /// @notice The operator can call this to give funds to the contract.
     function action_addContractFunds() external payable {
         lock_start();
@@ -1101,17 +1095,18 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock_end();
     }
 
-    /// @notice Anyone can call this to add funds to the bonus prize pool.
+    /// @notice Anyone can call this to add funds to the bonus prize pool, but only if the contract is not corrupt.
     function action_addBonusPrizePool() external payable {
         lock_start();
 
         requireNotCorruptContract();
+
         addBonusPrizePool(msg.value);
 
         lock_end();
     }
 
-    /// @notice Players can call this to buy tickets for the current lottery, but only if it is still active and not corrupt.
+    /// @notice Players can call this to buy tickets for the current lottery, but only if it is still active and the contract is not corrupt.
     function action_buyTickets() external payable {
         lock_start();
 
@@ -1146,7 +1141,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock_end();
     }
 
-    /// @notice The operator can call this to cancel the current lottery and refund everyone. This must be called before a winning ticket is drawn. The operator gives up their cut and must pay a penalty fee to do this.
+    /// @notice The operator can call this before a winning ticket is drawn to cancel the current lottery and refund everyone. The operator gives up their cut and must pay a penalty fee to do this.
     function action_cancelCurrentLottery() external payable {
         lock_start();
 
@@ -1155,6 +1150,18 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requirePenaltyPayment(msg.value);
         
         cancelCurrentLottery(msg.value);
+
+        lock_end();
+    }
+
+    /// @notice Anyone can call this before a winning ticket is drawn to cancel the current lottery and refund everyone, but only if the contract is corrupt. There is no penalty fee in this case.
+    function action_cancelCurrentLotteryCorrupt() external {
+        lock_start();
+
+        requireNoWinningTicketDrawn();
+        requireCorruptContract();
+        
+        cancelCurrentLottery(0);
 
         lock_end();
     }
@@ -1183,7 +1190,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice The owner can call this to make themselves the operator.
-    function action_takeOperatorAddress() external {
+    function action_takeOperatorRole() external {
         lock_start();
 
         requireOwnerAddress(msg.sender);
@@ -1249,14 +1256,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock_end();
     }
 
-
-
-
-
-
-
-
-
     /// @notice The owner can transfer ownership to a new address.
     /// @param newOwnerAddress The new owner address.
     function set_ownerAddress(address newOwnerAddress) external {
@@ -1281,8 +1280,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock_end();
     }
 
-    
-
     /// @notice The operator can change the total number of active blocks for the lottery. This change will go into effect starting from the next lottery.
     /// @param newLotteryActiveBlocks The new total number of active blocks for the lottery.
     function set_lotteryActiveBlocks(uint newLotteryActiveBlocks) external {
@@ -1306,9 +1303,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
         lock_end();
     }
-
     
-
     /// @notice The owner can call this to get information about the internal state of the contract.
     function diagnostic_getInternalInfo1() external view returns (uint _operatorCut, uint _maxTicketPurchase, bool _lockFlag, bool _corruptContractFlag, uint _corruptContractBlockNumber, uint _corruptContractGracePeriodBlocks, uint _lotteryNumber, uint _lotteryBlockNumberStart, uint _lotteryActiveBlocks, uint _currentLotteryActiveBlocks, address _ownerAddress, address _operatorAddress) {
         requireOwnerAddress(msg.sender);
