@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 
-pragma solidity >=0.8.12 <0.9.0;
+pragma solidity 0.8.17;
 
 // The lottery contract is not a token. We only use the IERC20 interface so that any tokens sent to this contract can be accessed.
 
