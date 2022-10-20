@@ -125,13 +125,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     event OperatorChanged(address indexed oldOperatorAddress, address indexed newOperatorAddress);
 
     /// @notice A record of a lottery starting.
-    event LotteryStart(uint indexed lotteryNumber, uint indexed lotteryBlockStart, uint indexed lotteryBlockDuration, uint ticketPrice);
+    event LotteryStart(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart, uint indexed lotteryBlockDuration, uint ticketPrice);
 
     /// @notice A record of a lottery ending.
-    event LotteryEnd(uint indexed lotteryNumber, uint indexed lotteryBlockStart, address indexed winningAddress, uint winnerPrize);
+    event LotteryEnd(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart, address indexed winningAddress, uint winnerPrize);
 
     /// @notice A record of a lottery being canceled.
-    event LotteryCancel(uint indexed lotteryNumber, uint indexed lotteryBlockStart);
+    event LotteryCancel(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart);
 
     /// @notice A record of a winning ticket being drawn.
     event WinningTicketDrawn(uint indexed winningTicket, uint indexed totalTickets);
@@ -156,20 +156,19 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     // If the contract is in a bad state, the owner is allowed to take emergency actions. This is designed to allow emergencies to be remedied without allowing anyone to steal the contract funds.
     // Currently, the only known possible bad state would be caused by Chainlink being permanently down.
     bool private corruptContractFlag;
-    uint private corruptContractBlock;
+    uint private corruptContractBlockNumber;
     uint private constant corruptContractGracePeriodBlocks = 864000; // About 30 days.
 
     // The current lottery number.
     uint private lotteryNumber;
 
-    // Block where the lottery started.
-    uint private lotteryBlockStart;
+    // Block number where the lottery started.
+    uint private lotteryBlockNumberStart;
 
-    // The number of additional blocks after the starting block where players may purchase tickets.
-    // After this duration, buying tickets is not allowed and anyone may end the lottery to distribute prizes and start a new lottery.
-    // If the duration is changed, the new duration will only apply to future lotteries, not the current one.
-    uint private lotteryBlockDuration;
-    uint private currentLotteryBlockDuration;
+    // The number of blocks where the lottery is active and players may purchase tickets.
+    // If the amount is changed, the new amount will only apply to future lotteries, not the current one.
+    uint private lotteryActiveBlocks;
+    uint private currentLotteryActiveBlocks;
 
     // The owner is the original operator and is able to assign themselves the operator role at any time.
     address private ownerAddress;
@@ -224,7 +223,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     uint private constant chainlinkRetryMax = 10;
 
     bool private chainlinkRequestIdFlag;
-    uint private chainlinkRequestIdBlock;
+    uint private chainlinkRequestIdBlockNumber;
     uint private chainlinkRequestIdLotteryNumber;
     uint private chainlinkRequestId;
 
@@ -235,13 +234,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         Contract Functions
     */
 
-    constructor(uint initialLotteryBlockDuration, uint initialTicketPrice) VRFV2WrapperConsumerBase(chainlinkAddress, chainlinkWrapperAddress) payable {
+    constructor(uint initialLotteryActiveBlocks, uint initialTicketPrice) VRFV2WrapperConsumerBase(chainlinkAddress, chainlinkWrapperAddress) payable {
         addContractFunds(msg.value);
 
         setOwnerAddress(msg.sender);
         setOperatorAddress(msg.sender);
 
-        lotteryBlockDuration = initialLotteryBlockDuration;
+        lotteryActiveBlocks = initialLotteryActiveBlocks;
         ticketPrice = initialTicketPrice;
 
         startNewLottery();
@@ -303,18 +302,18 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         currentTicketNumber = 0;
 
         // If any of these values have been changed by the operator, update them now before starting the next lottery.
-        currentLotteryBlockDuration = lotteryBlockDuration;
+        currentLotteryActiveBlocks = lotteryActiveBlocks;
         currentTicketPrice = ticketPrice;
 
         lotteryNumber++;
-        lotteryBlockStart = block.number;
+        lotteryBlockNumberStart = block.number;
 
         chainlinkRetryCounter = 0;
 
         chainlinkRequestIdFlag = false;
         winningTicketFlag = false;
 
-        emit LotteryStart(lotteryNumber, lotteryBlockStart, lotteryBlockDuration, ticketPrice);
+        emit LotteryStart(lotteryNumber, lotteryBlockNumberStart, lotteryActiveBlocks, ticketPrice);
     }
 
     function endCurrentLottery() private {
@@ -347,7 +346,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         map_lotteryNum2WinningAddress[lotteryNumber] = winningAddress;
         map_lotteryNum2WinnerPrize[lotteryNumber] = winnerPrize;
 
-        emit LotteryEnd(lotteryNumber, lotteryBlockStart, winningAddress, winnerPrize);
+        emit LotteryEnd(lotteryNumber, lotteryBlockNumberStart, winningAddress, winnerPrize);
 
         startNewLottery();
     }
@@ -355,7 +354,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function cancelCurrentLottery(uint value) private {
         // Mark the current lottery as refundable and start a new lottery.
         map_lotteryNum2IsRefundable[lotteryNumber] = true;
-        emit LotteryCancel(lotteryNumber, lotteryBlockStart);
+        emit LotteryCancel(lotteryNumber, lotteryBlockNumberStart);
 
         // Move funds in the player prize pool to the refund pool. Players who have purchased tickets may request a refund manually.
         addRefundPool(playerPrizePool);
@@ -386,8 +385,18 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return lotteryNumber;
     }
 
+    function getRemainingLotteryActiveBlocks() private view returns (uint) {
+        uint numBlocksAfterStart = block.number - lotteryBlockNumberStart;
+        if(numBlocksAfterStart <= currentLotteryActiveBlocks) {
+            return currentLotteryActiveBlocks - numBlocksAfterStart;
+        }
+        else {
+            return 0;
+        }
+    }
+
     function isLotteryActive() private view returns (bool) {
-        return block.number - lotteryBlockStart <= currentLotteryBlockDuration;
+        return getRemainingLotteryActiveBlocks() > 0;
     }
 
     function requireLotteryActive() private view {
@@ -440,17 +449,17 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return map_lotteryNum2Address2NumTickets[lotteryNumber][_address] != 0;
     }
 
-    function getLotteryBlockStart() private view returns (uint) {
-        return lotteryBlockStart;
+    function getLotteryBlockNumberStart() private view returns (uint) {
+        return lotteryBlockNumberStart;
     }
 
-    function getLotteryBlockDuration() private view returns (uint) {
-        return currentLotteryBlockDuration;
+    function getLotteryActiveBlocks() private view returns (uint) {
+        return currentLotteryActiveBlocks;
     }
 
-    function setLotteryBlockDuration(uint newLotteryBlockDuration) private {
-        // Do not set the current lottery block duration here. When the next lottery starts, the current lottery block duration will be updated.
-        lotteryBlockDuration = newLotteryBlockDuration;
+    function setLotteryActiveBlocks(uint newLotteryActiveBlocks) private {
+        // Do not set the current active lottery blocks here. When the next lottery starts, the current active lottery blocks will be updated.
+        lotteryActiveBlocks = newLotteryActiveBlocks;
     }
 
     function getTicketPrice() private view returns (uint) {
@@ -504,14 +513,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         chainlinkRetryCounter++;
 
         chainlinkRequestIdFlag = true;
-        chainlinkRequestIdBlock = block.number;
+        chainlinkRequestIdBlockNumber = block.number;
         chainlinkRequestIdLotteryNumber = lotteryNumber;
         chainlinkRequestId = requestRandomness(chainlinkCallbackGasLimit, chainlinkRequestConfirmationBlocks, 1);
     }
 
     function isRetryPermitted() private view returns (bool) {
         // We allow for a redraw if the random number has not been received after a certain number of blocks. This would be needed if Chainlink ever experiences an outage.
-        return block.number - chainlinkRequestIdBlock > chainlinkRequestRetryBlocks;
+        return block.number - chainlinkRequestIdBlockNumber > chainlinkRequestRetryBlocks;
     }
 
     function fulfillRandomWords(uint requestId, uint[] memory randomWords) internal override {
@@ -774,14 +783,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             // Do not allow "isCorruptBlock" to keep increasing or multiple events to be issued.
             if(!corruptContractFlag) {
                 corruptContractFlag = true;
-                corruptContractBlock = block.number;
+                corruptContractBlockNumber = block.number;
 
                 emit Corruption(block.number);
             }
         }
         else {
             corruptContractFlag = false;
-            corruptContractBlock = 0;
+            corruptContractBlockNumber = 0;
 
             emit CorruptionReset(block.number);
         }
@@ -794,7 +803,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function isGracePeriod() private view returns (bool) {
-        return block.number - corruptContractBlock <= corruptContractGracePeriodBlocks;
+        return block.number - corruptContractBlockNumber <= corruptContractGracePeriodBlocks;
     }
 
     function isSelfdestructReady() private view returns (bool) {
@@ -943,16 +952,22 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return getLotteryNumber();
     }
 
-    /// @notice Returns the start block of the current lottery
-    /// @return The start block of the current lottery
-    function query_getLotteryBlockStart() external view returns (uint) {
-        return getLotteryBlockStart();
+    /// @notice Returns the start block number of the current lottery
+    /// @return The start block number of the current lottery
+    function query_getLotteryBlockNumberStart() external view returns (uint) {
+        return getLotteryBlockNumberStart();
     }
 
-    /// @notice Returns the duration of the current lottery in blocks.
-    /// @return The duration of the current lottery in blocks.
-    function query_getLotteryBlockDuration() external view returns (uint) {
-        return getLotteryBlockDuration();
+    /// @notice Returns the total number of active blocks for the current lottery.
+    /// @return The total number of active blocks for the current lottery.
+    function query_getLotteryActiveBlocks() external view returns (uint) {
+        return getLotteryActiveBlocks();
+    }
+
+    /// @notice Returns the remaining number of active blocks for the current lottery.
+    /// @return The remaining number of active blocks for the current lottery.
+    function query_getRemainingLotteryActiveBlocks() external view returns (uint) {
+        return getRemainingLotteryActiveBlocks();
     }
 
     /// @notice Returns the ticket price of the current lottery.
@@ -1115,14 +1130,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock_end();
     }
 
-    /// @notice The operator can change the duration of the lottery. This change will go into effect starting from the next lottery.
-    /// @param newLotteryBlockDuration The new duration of the lottery in blocks.
-    function action_setLotteryBlockDuration(uint newLotteryBlockDuration) external {
+    /// @notice The operator can change the total number of active blocks for the lottery. This change will go into effect starting from the next lottery.
+    /// @param newLotteryActiveBlocks The new total number of active blocks for the lottery.
+    function action_setLotteryActiveBlocks(uint newLotteryActiveBlocks) external {
         lock_start();
 
         requireOperatorAddress(msg.sender);
 
-        setLotteryBlockDuration(newLotteryBlockDuration);
+        setLotteryActiveBlocks(newLotteryActiveBlocks);
 
         lock_end();
     }
@@ -1196,17 +1211,17 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice The owner can call this to get information about the internal state of the contract.
-    function diagnostic_getInternalInfo1() external view returns (uint _operatorCut, uint _maxTicketPurchase, bool _lockFlag, bool _corruptContractFlag, uint _corruptContractBlock, uint _corruptContractGracePeriodBlocks, uint _lotteryNumber, uint _lotteryBlockStart, uint _lotteryBlockDuration, uint _currentLotteryBlockDuration, address _ownerAddress, address _operatorAddress) {
+    function diagnostic_getInternalInfo1() external view returns (uint _operatorCut, uint _maxTicketPurchase, bool _lockFlag, bool _corruptContractFlag, uint _corruptContractBlockNumber, uint _corruptContractGracePeriodBlocks, uint _lotteryNumber, uint _lotteryBlockNumberStart, uint _lotteryActiveBlocks, uint _currentLotteryActiveBlocks, address _ownerAddress, address _operatorAddress) {
         requireOwnerAddress(msg.sender);
 
-        return(operatorCut, maxTicketPurchase, lockFlag, corruptContractFlag, corruptContractBlock, corruptContractGracePeriodBlocks, lotteryNumber, lotteryBlockStart, lotteryBlockDuration, currentLotteryBlockDuration, ownerAddress, operatorAddress);
+        return(operatorCut, maxTicketPurchase, lockFlag, corruptContractFlag, corruptContractBlockNumber, corruptContractGracePeriodBlocks, lotteryNumber, lotteryBlockNumberStart, lotteryActiveBlocks, currentLotteryActiveBlocks, ownerAddress, operatorAddress);
     }
 
     /// @notice The owner can call this to get information about the internal state of the contract.
-    function diagnostic_getInternalInfo2() external view returns (uint _ticketPrice, uint _currentTicketPrice, uint _contractFunds, uint _playerPrizePool, uint _bonusPrizePool, uint _claimableBalancePool, uint _refundPool, uint _currentTicketNumber, uint _chainlinkRetryCounter, uint _chainlinkRetryMax, bool _chainlinkRequestIdFlag, uint _chainlinkRequestIdBlock) {
+    function diagnostic_getInternalInfo2() external view returns (uint _ticketPrice, uint _currentTicketPrice, uint _contractFunds, uint _playerPrizePool, uint _bonusPrizePool, uint _claimableBalancePool, uint _refundPool, uint _currentTicketNumber, uint _chainlinkRetryCounter, uint _chainlinkRetryMax, bool _chainlinkRequestIdFlag, uint _chainlinkRequestIdBlockNumber) {
         requireOwnerAddress(msg.sender);
 
-        return(ticketPrice, currentTicketPrice, contractFunds, playerPrizePool, bonusPrizePool, claimableBalancePool, refundPool, currentTicketNumber, chainlinkRetryCounter, chainlinkRetryMax, chainlinkRequestIdFlag, chainlinkRequestIdBlock);
+        return(ticketPrice, currentTicketPrice, contractFunds, playerPrizePool, bonusPrizePool, claimableBalancePool, refundPool, currentTicketNumber, chainlinkRetryCounter, chainlinkRetryMax, chainlinkRequestIdFlag, chainlinkRequestIdBlockNumber);
     }
 
     /// @notice The owner can call this to get information about the internal state of the contract.
