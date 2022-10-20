@@ -88,10 +88,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     error InsufficientFundsError(uint requestedValue, uint contractBalance);
 
     /// @notice The token contract could not be found.
-    error TokenContractError(address tokenContractAddress);
+    error TokenContractError(address tokenAddress);
 
     /// @notice The token transfer failed.
-    error TokenTransferError(address tokenContractAddress, address _address, uint requestedValue);
+    error TokenTransferError(address tokenAddress, address _address, uint requestedValue);
 
     /// @notice Withdrawing any Chainlink would violate the minimum reserve requirement.
     error ChainlinkMinimumReserveError(uint chainlinkMinimumReserve);
@@ -609,16 +609,16 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return address(this).balance;
     }
 
-    function getTokenBalance(address tokenContractAddress) private view returns (uint) {
-        IERC20 tokenContract = IERC20(tokenContractAddress);
+    function getTokenBalance(address tokenAddress) private view returns (uint) {
+        IERC20 tokenContract = IERC20(tokenAddress);
         return tokenContract.balanceOf(address(this));
     }
 
-    function withdrawTokenBalance(address tokenContractAddress, address _address) private {
+    function withdrawTokenBalance(address tokenAddress, address _address) private {
         // For Chainlink, we honor the minimum reserve requirement. For any other token, just withdraw the entire balance.
-        uint tokenBalance = getTokenBalance(tokenContractAddress);
+        uint tokenBalance = getTokenBalance(tokenAddress);
 
-        if(tokenContractAddress == chainlinkTokenAddress) {
+        if(tokenAddress == chainlinkTokenAddress) {
             if(tokenBalance >= chainlinkMinimumReserve) {
                 tokenBalance -= chainlinkMinimumReserve;
             }
@@ -627,7 +627,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             }
         }
 
-        tokenTransferToAddress(tokenContractAddress, _address, tokenBalance);
+        tokenTransferToAddress(tokenAddress, _address, tokenBalance);
     }
 
     function withdrawAllChainlink(address _address) private {
@@ -784,18 +784,18 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         payable(_address).transfer(value);
     }
 
-    function tokenTransferToAddress(address tokenContractAddress, address _address, uint value) private {
+    function tokenTransferToAddress(address tokenAddress, address _address, uint value) private {
         // Take extra care to account for tokens that don't revert on failure or that don't return a value.
         // A return value is optional, but if it is present then it must be true.
-        if(tokenContractAddress.code.length == 0) {
-            revert TokenContractError(tokenContractAddress);
+        if(tokenAddress.code.length == 0) {
+            revert TokenContractError(tokenAddress);
         }
 
-        bytes memory callData = abi.encodeWithSelector(IERC20(tokenContractAddress).transfer.selector, _address, value);
-        (bool success, bytes memory returnData) = tokenContractAddress.call(callData);
+        bytes memory callData = abi.encodeWithSelector(IERC20(tokenAddress).transfer.selector, _address, value);
+        (bool success, bytes memory returnData) = tokenAddress.call(callData);
 
         if(!success || (returnData.length > 0 && !abi.decode(returnData, (bool)))) {
-            revert TokenTransferError(tokenContractAddress, _address, value);
+            revert TokenTransferError(tokenAddress, _address, value);
         }
     }
 
@@ -1064,10 +1064,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice Returns the balance of a token.
-    /// @param tokenContractAddress The address where the token's contract lives.
+    /// @param tokenAddress The address where the token's contract lives.
     /// @return The token balance.
-    function get_tokenBalance(address tokenContractAddress) external view returns (uint) {
-        return getTokenBalance(tokenContractAddress);
+    function get_tokenBalance(address tokenAddress) external view returns (uint) {
+        return getTokenBalance(tokenAddress);
     }
 
     /// @notice Returns the winning address of a lottery.
@@ -1245,13 +1245,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice The operator can withdraw all of one kind of token. Note that Chainlink is subject to a minimum reserve requirement.
-    /// @param tokenContractAddress The address where the token's contract lives.
-    function action_withdrawTokenBalance(address tokenContractAddress) external {
+    /// @param tokenAddress The address where the token's contract lives.
+    function action_withdrawTokenBalance(address tokenAddress) external {
         lock_start();
 
         requireOperatorAddress(msg.sender);
 
-        withdrawTokenBalance(tokenContractAddress, msg.sender);
+        withdrawTokenBalance(tokenAddress, msg.sender);
 
         lock_end();
     }
