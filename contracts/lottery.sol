@@ -378,11 +378,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function findWinningAddress(uint ticket) private view returns (address) {
-        // Because "map_ticket2Address" may have gaps, we must search until we find the winning address.
-        address winningAddress;
+        address winningAddress = map_ticket2Address[ticket];
 
-        while(winningAddress == address(0) && ticket > 0) {
-            winningAddress = map_ticket2Address[ticket--];
+        // Because "map_ticket2Address" potentially has gaps, we may have to search until we find the winning address.
+        // Note that because of the way "map_ticket2Address" is filled in, element 0 is guaranteed to have a nonzero address.
+        while(winningAddress == address(0)) {
+            winningAddress = map_ticket2Address[--ticket];
         }
 
         return winningAddress;
@@ -481,7 +482,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function getPenaltyPayment() private view returns (uint) {
         // The base penalty is 0.1 of the native coin, but if the lottery is inactive and there are at least two players, then the penalty is multiplied by 5.
-        uint penalty = 0.1e18;
+        uint penalty = 0.1 ether;
         if(!isLotteryActive() && !isZeroPlayerGame() && !isOnePlayerGame()) {
             penalty *= 5;
         }
