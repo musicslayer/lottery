@@ -77,9 +77,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     *
     */
 
-    /// @notice Withdrawing any Chainlink would violate the minimum reserve requirement.
-    error ChainlinkMinimumReserveError(uint requestedValue, uint chainlinkBalance, uint chainlinkMinimumReserve);
-
     /// @notice The requestId of the VRF request does not match the requestId of the callback.
     error ChainlinkVRFRequestIdMismatch(uint callbackRequestId, uint expectedRequestId);
 
@@ -127,6 +124,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice The token contract could not be found.
     error TokenContractError(address tokenAddress);
+
+    /// @notice The token withdraw is not allowed.
+    error TokenWithdrawError(address tokenAddress, uint requestedValue, uint tokenBalance, uint tokenMinimumReserve);
 
     /// @notice The token transfer failed.
     error TokenTransferError(address tokenAddress, address _address, uint requestedValue);
@@ -535,12 +535,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function withdrawAllChainlinkBalance(address _address) private {
-        // Withdraw all Chainlink, including the minimum reserve.
-        _withdrawTokens(CHAINLINK_TOKEN_ADDRESS, _address, getTokenBalance(CHAINLINK_TOKEN_ADDRESS), true);
-    }
-
-    function withdrawAllTokenBalance(address tokenAddress, address _address) private {
-        _withdrawTokens(tokenAddress, _address, getTokenBalance(tokenAddress), false);
+        tokenTransferToAddress(CHAINLINK_TOKEN_ADDRESS, _address, getTokenBalance(CHAINLINK_TOKEN_ADDRESS));
     }
 
     function withdrawAllContractFunds(address _address) private {
@@ -549,9 +544,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         transferToAddress(_address, getOperatorContractBalance());
     }
 
+    function withdrawAllTokenBalance(address tokenAddress, address _address) private {
+        tokenTransferToAddress(tokenAddress, _address, getTokenBalance(tokenAddress));
+    }
+
     function withdrawChainlinkBalance(address _address, uint value) private {
-        // Withdraw any amount of Chainlink, including the minimum reserve.
-        _withdrawTokens(CHAINLINK_TOKEN_ADDRESS, _address, value, true);
+        tokenTransferToAddress(CHAINLINK_TOKEN_ADDRESS, _address, value);
     }
 
     function withdrawContractFunds(address _address, uint value) private {
@@ -570,25 +568,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function withdrawTokenBalance(address tokenAddress, address _address, uint value) private {
-        _withdrawTokens(tokenAddress, _address, value, false);
-    }
-
-    function _withdrawTokens(address tokenAddress, address _address, uint value, bool bypassReserve) private {
-        // For Chainlink, we may have to honor the minimum reserve requirement.
-        if(tokenAddress == CHAINLINK_TOKEN_ADDRESS && !bypassReserve) {
-            uint tokenBalance = getTokenBalance(tokenAddress);
-
-            if(tokenBalance < CHAINLINK_MINIMUM_RESERVE) {
-                revert ChainlinkMinimumReserveError(value, tokenBalance, CHAINLINK_MINIMUM_RESERVE);
-            }
-            else {
-                uint allowedValue = tokenBalance - CHAINLINK_MINIMUM_RESERVE;
-                if(allowedValue < value) {
-                    revert ChainlinkMinimumReserveError(value, tokenBalance, CHAINLINK_MINIMUM_RESERVE);
-                }
-            }
-        }
-
         tokenTransferToAddress(tokenAddress, _address, value);
     }
 
@@ -645,6 +624,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         // -> The contract must be corrupt.
         // -> After the contract became corrupt, the owner must wait for a grace period to pass. This gives everyone a chance to withdraw any funds owed to them.
         return isCorruptContract() && !isCorruptContractGracePeriod();
+    }
+
+    function isTokenWithdrawAllowed(address tokenAddress, uint value) private view returns (bool) {
+        return value <= getAllowedTokenWithdrawBalance(tokenAddress);
     }
 
     function isWinningTicketDrawn() private view returns (bool) {
@@ -720,6 +703,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
     }
 
+    function requireTokenWithdrawAllowed(address tokenAddress, uint value) private view {
+        if(!isTokenWithdrawAllowed(tokenAddress, value)) {
+            revert TokenWithdrawError(tokenAddress, value, getTokenBalance(tokenAddress), getTokenMinimumReserve(tokenAddress));
+        }
+    }
+
     function requireWinningTicketDrawn() private view {
         if(!isWinningTicketDrawn()) {
             revert NoWinningTicketDrawnError();
@@ -750,6 +739,20 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function getAddressWinChance(address _address, uint N) private view returns (uint) {
         return getTotalAddressTickets(_address) * N / getTotalTickets();
+    }
+
+    function getAllowedTokenWithdrawBalance(address tokenAddress) private view returns (uint) {
+        // Note that aside from maintaining any minimum reserve requirements, we also forbid withdrawing an amount higher than the available balance.
+        // Even if the token's contract would allow for such a strange withdraw, we do not permit it here.
+        uint tokenBalance = getTokenBalance(tokenAddress);
+        uint reserve = getTokenMinimumReserve(tokenAddress);
+
+        if(tokenBalance < reserve) {
+            return 0;
+        }
+        else {
+            return tokenBalance - reserve;
+        }
     }
 
     function getBonusPrizePool() private view returns (uint) {
@@ -858,6 +861,16 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return map_lotteryNum2Address2NumTickets[lotteryNumber][_address];
     }
 
+    function getTokenMinimumReserve(address tokenAddress) private view returns (uint) {
+        // Chainlink is the only token with a minimum reserve requirement, and if the contract is ready to be destroyed then the reserve no longer applies.
+        if(tokenAddress == CHAINLINK_TOKEN_ADDRESS && !isSelfDestructReady()) {
+            return CHAINLINK_MINIMUM_RESERVE;
+        }
+        else {
+            return 0;
+        }
+    }
+
     function getTotalTickets() private view returns (uint) {
         return currentTicketNumber;
     }
@@ -943,7 +956,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function tokenTransferToAddress(address tokenAddress, address _address, uint value) private {
         // Take extra care to account for tokens that don't revert on failure or that don't return a value.
         // A return value is optional, but if it is present then it must be true.
-        // Note that we do not check the token balance ourselves. We defer to the token's contract as to whether the transfer can be done.
         if(tokenAddress.code.length == 0) {
             revert TokenContractError(tokenAddress);
         }
@@ -1081,12 +1093,16 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         unlock();
     }
 
-    /// @notice The owner can call this to withdraw all Chainlink, including the minimum reserve. This can only be used if the contract is ready to be destroyed.
+    /// @notice The operator can call this to withdraw all Chainlink, subject to a possible minimum reserve requirement.
     function withdraw_allChainlinkBalance() external {
-        requireOwnerAddress(msg.sender);
-        requireSelfDestructReady();
+        lock();
+
+        requireOperatorAddress(msg.sender);
+        requireTokenWithdrawAllowed(CHAINLINK_TOKEN_ADDRESS, getTokenBalance(CHAINLINK_TOKEN_ADDRESS));
 
         withdrawAllChainlinkBalance(msg.sender);
+
+        unlock();
     }
 
     /// @notice The operator can call this to withdraw all contract funds.
@@ -1100,25 +1116,30 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         unlock();
     }
 
-    /// @notice The operator can withdraw all of one kind of token. Note that Chainlink is subject to a minimum reserve requirement.
+    /// @notice The operator can withdraw all of one kind of token, subject to a possible minimum reserve requirement.
     /// @param tokenAddress The address where the token's contract lives.
     function withdraw_allTokenBalance(address tokenAddress) external {
         lock();
 
         requireOperatorAddress(msg.sender);
+        requireTokenWithdrawAllowed(tokenAddress, getTokenBalance(tokenAddress));
 
         withdrawAllTokenBalance(tokenAddress, msg.sender);
 
         unlock();
     }
 
-    /// @notice The owner can call this to withdraw any amount of Chainlink, including the minimum reserve. This can only be used if the contract is ready to be destroyed.
+    /// @notice The operator can call this to withdraw any amount of Chainlink, subject to a possible minimum reserve requirement.
     /// @param value The amount of Chainlink to withdraw.
     function withdraw_chainlinkBalance(uint value) external {
-        requireOwnerAddress(msg.sender);
-        requireSelfDestructReady();
+        lock();
+
+        requireOperatorAddress(msg.sender);
+        requireTokenWithdrawAllowed(CHAINLINK_TOKEN_ADDRESS, value);
 
         withdrawChainlinkBalance(msg.sender, value);
+
+        unlock();
     }
 
     /// @notice The operator can call this to withdraw an amount of the contract funds.
@@ -1158,13 +1179,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         unlock();
     }
 
-    /// @notice The operator can withdraw any amount of one kind of token. Note that Chainlink is subject to a minimum reserve requirement.
+    /// @notice The operator can withdraw any amount of one kind of token, subject to a possible minimum reserve requirement.
     /// @param tokenAddress The address where the token's contract lives.
     /// @param value The amount of tokens to withdraw.
     function withdraw_tokenBalance(address tokenAddress, uint value) external {
         lock();
 
         requireOperatorAddress(msg.sender);
+        requireTokenWithdrawAllowed(tokenAddress, value);
 
         withdrawTokenBalance(tokenAddress, msg.sender, value);
 
@@ -1242,6 +1264,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return isSelfDestructReady();
     }
 
+    /// @notice Returns whether a withdraw of the specified amount of the token would be allowed.
+    /// @param tokenAddress The address where the token's contract lives.
+    /// @param value The amount of tokens to withdraw.
+    /// @return Whether a withdraw of the specified amount of the token would be allowed.
+    function query_isTokenWithdrawAllowed(address tokenAddress, uint value) external view returns (bool) {
+        return isTokenWithdrawAllowed(tokenAddress, value);
+    }
+
     /// @notice Returns whether a winning ticket has been drawn for the current lottery.
     /// @return Whether a winning ticket has been drawn for the current lottery.
     function query_isWinningTicketDrawn() external view returns (bool) {
@@ -1292,6 +1322,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @return The predicted number of times that the address will win out of N times.
     function get_addressWinChanceOutOf(address _address, uint N) external view returns (uint) {
         return getAddressWinChance(_address, N);
+    }
+
+    /// @notice Returns the amount of a token that can be withdrawn.
+    /// @param tokenAddress The address where the token's contract lives.
+    /// @return The amount of a token that can be withdrawn.
+    function get_allowedTokenWithdrawBalance(address tokenAddress) external view returns (uint) {
+        return getAllowedTokenWithdrawBalance(tokenAddress);
     }
 
     /// @notice Returns the bonus prize pool. This is the amount of bonus funds that anyone can donate to "sweeten the pot".
@@ -1415,6 +1452,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @return The token balance.
     function get_tokenBalance(address tokenAddress) external view returns (uint) {
         return getTokenBalance(tokenAddress);
+    }
+
+    /// @notice Returns the minimum reserve requirement of a token.
+    /// @param tokenAddress The address where the token's contract lives.
+    /// @return The minimum reserve requirement of a token.
+    function get_tokenMinimumReserve(address tokenAddress) external view returns (uint) {
+        return getTokenMinimumReserve(tokenAddress);
     }
 
     /// @notice Returns the number of tickets an address has in the current lottery.
