@@ -317,7 +317,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lotteryBlockNumberStart = block.number;
 
         chainlinkRetryCounter = 0;
-
         chainlinkRequestIdFlag = false;
         winningTicketFlag = false;
 
@@ -519,12 +518,23 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             return;
         }
 
-        chainlinkRetryCounter++;
+        if(isZeroPlayerGame() || isOnePlayerGame()) {
+            // Don't bother paying Chainlink since we don't need a random number anyway.
+            setWinningTicket(0);
+        }
+        else {
+            chainlinkRetryCounter++;
+            chainlinkRequestIdFlag = true;
+            chainlinkRequestIdBlockNumber = block.number;
+            chainlinkRequestIdLotteryNumber = lotteryNumber;
+            chainlinkRequestId = requestRandomness(CHAINLINK_CALLBACK_GAS_LIMIT, CHAINLINK_REQUEST_CONFIRMATION_BLOCKS, 1);
+        }
+    }
 
-        chainlinkRequestIdFlag = true;
-        chainlinkRequestIdBlockNumber = block.number;
-        chainlinkRequestIdLotteryNumber = lotteryNumber;
-        chainlinkRequestId = requestRandomness(CHAINLINK_CALLBACK_GAS_LIMIT, CHAINLINK_REQUEST_CONFIRMATION_BLOCKS, 1);
+    function setWinningTicket(uint _winningTicket) private {
+        winningTicketFlag = true;
+        winningTicket = _winningTicket;
+        emit WinningTicketDrawn(_winningTicket, currentTicketNumber);
     }
 
     function isRetryPermitted() private view returns (bool) {
@@ -533,7 +543,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function fulfillRandomWords(uint requestId, uint[] memory randomWords) internal override {
-        // This is the Chainlink VRF callback that will give us the random number we requested. We use this to choose a winning ticket.
+        // This is the Chainlink VRF callback that will give us the random number we requested.
+        // We use this to choose a winning ticket if at least two players have entered the lottery.
         if(chainlinkRequestId != requestId) {
             revert ChainlinkVRFRequestIdMismatch(requestId, chainlinkRequestId);
         }
@@ -542,11 +553,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             revert ChainlinkVRFRequestStale(chainlinkRequestIdLotteryNumber, lotteryNumber);
         }
 
-        winningTicketFlag = true;
-        uint randomNumber = randomWords[0];
-        winningTicket = randomNumber % currentTicketNumber;
-
-        emit WinningTicketDrawn(winningTicket, currentTicketNumber);
+        setWinningTicket(randomWords[0] % currentTicketNumber);
     }
 
     /*
