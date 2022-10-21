@@ -69,29 +69,13 @@ abstract contract VRFV2WrapperConsumerBase {
  * @author Musicslayer
  */
 contract MusicslayerLottery is VRFV2WrapperConsumerBase {
-    /// @notice The current lottery is not active and tickets purchases are not allowed.
-    error LotteryInactiveError();
-
-    /// @notice The current lottery is active and is not ready to be ended.
-    error LotteryActiveError();
-
-    /// @notice The calling address is not the contract owner.
-    error NotOwnerError(address _address, address ownerAddress);
-
-    /// @notice The calling address is not the operator.
-    error NotOperatorError(address _address, address operatorAddress);
-
-    /// @notice The calling address is not an eligible player.
-    error NotPlayerError(address _address);
-
-    /// @notice This contract does not have the funds requested.
-    error InsufficientFundsError(uint requestedValue, uint contractBalance);
-
-    /// @notice The token contract could not be found.
-    error TokenContractError(address tokenAddress);
-
-    /// @notice The token transfer failed.
-    error TokenTransferError(address tokenAddress, address _address, uint requestedValue);
+    /*
+    *
+    *
+        Errors
+    *
+    *
+    */
 
     /// @notice Withdrawing any Chainlink would violate the minimum reserve requirement.
     error ChainlinkMinimumReserveError(uint chainlinkMinimumReserve);
@@ -102,47 +86,61 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice The VRF request was initiated during a previous lottery.
     error ChainlinkVRFRequestStale(uint requestLotteryNumber, uint currentLotteryNumber);
 
+    /// @notice This contract is corrupt.
+    error CorruptContractError();
+
     /// @notice Drawing a winning ticket is not allowed at this time.
     error DrawWinningTicketError();
 
-    /// @notice A winning ticket has not been drawn yet.
-    error NoWinningTicketDrawnError();
+    /// @notice This contract does not have the funds requested.
+    error InsufficientFundsError(uint requestedValue, uint contractBalance);
 
-    /// @notice A winning ticket has already been drawn.
-    error WinningTicketDrawnError();
+    /// @notice The current lottery is active and is not ready to be ended.
+    error LotteryActiveError();
 
-    /// @notice The required penalty has not been paid.
-    error PenaltyNotPaidError(uint value, uint penalty);
+    /// @notice The current lottery is not active and tickets purchases are not allowed.
+    error LotteryInactiveError();
 
     /// @notice This transaction is purchasing too many tickets.
     error MaxTicketPurchaseError(uint requestedTicketPurchase, uint maxTicketPurchase);
 
+    /// @notice A winning ticket has not been drawn yet.
+    error NoWinningTicketDrawnError();
+
     /// @notice This contract is not corrupt.
     error NotCorruptContractError();
 
-    /// @notice This contract is corrupt.
-    error CorruptContractError();
+    /// @notice The calling address is not the operator.
+    error NotOperatorError(address _address, address operatorAddress);
+
+    /// @notice The calling address is not the contract owner.
+    error NotOwnerError(address _address, address ownerAddress);
+
+    /// @notice The calling address is not an eligible player.
+    error NotPlayerError(address _address);
+
+    /// @notice The required penalty has not been paid.
+    error PenaltyNotPaidError(uint value, uint penalty);
 
     /// @notice The self-destruct is not ready.
     error SelfDestructNotReadyError();
 
-    /// @notice A record of the owner address changing.
-    event OwnerChanged(address indexed oldOwnerAddress, address indexed newOwnerAddress);
+    /// @notice The token contract could not be found.
+    error TokenContractError(address tokenAddress);
 
-    /// @notice A record of the operator address changing.
-    event OperatorChanged(address indexed oldOperatorAddress, address indexed newOperatorAddress);
+    /// @notice The token transfer failed.
+    error TokenTransferError(address tokenAddress, address _address, uint requestedValue);
 
-    /// @notice A record of a lottery starting.
-    event LotteryStart(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart, uint indexed lotteryBlockDuration, uint ticketPrice);
-
-    /// @notice A record of a lottery ending.
-    event LotteryEnd(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart, address indexed winningAddress, uint winnerPrize);
-
-    /// @notice A record of a lottery being canceled.
-    event LotteryCancel(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart);
-
-    /// @notice A record of a winning ticket being drawn.
-    event WinningTicketDrawn(uint indexed winningTicket, uint indexed totalTickets);
+    /// @notice A winning ticket has already been drawn.
+    error WinningTicketDrawnError();
+    
+    /*
+    *
+    *
+        Events
+    *
+    *
+    */
 
     /// @notice A record of the contract becoming corrupt.
     event Corruption(uint indexed blockNumber);
@@ -150,14 +148,68 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice A record of the contract becoming uncorrupt.
     event CorruptionReset(uint indexed blockNumber);
 
-    // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
-    // Note that the player always receives the entire "bonusPrizePool" amount.
-    uint private constant OPERATOR_CUT = 10;
+    /// @notice A record of a lottery being canceled.
+    event LotteryCancel(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart);
+
+    /// @notice A record of a lottery ending.
+    event LotteryEnd(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart, address indexed winningAddress, uint winnerPrize);
+
+    /// @notice A record of a lottery starting.
+    event LotteryStart(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart, uint indexed lotteryBlockDuration, uint ticketPrice);
+
+    /// @notice A record of the operator address changing.
+    event OperatorChanged(address indexed oldOperatorAddress, address indexed newOperatorAddress);
+
+    /// @notice A record of the owner address changing.
+    event OwnerChanged(address indexed oldOwnerAddress, address indexed newOwnerAddress);
+
+    /// @notice A record of a winning ticket being drawn.
+    event WinningTicketDrawn(uint indexed winningTicket, uint indexed totalTickets);
+
+    /*
+    *
+    *
+        Constants
+    *
+    *
+    */
+
+    /*
+        Lottery
+    */
+
+    // The grace period that everyone has to withdraw their funds before the owner can destroy a corrupt contract.
+    uint private constant CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS = 864_000; // About 30 days.
 
     // This is the maximum number of tickets that can be purchased in a single transaction.
     // Note that players can use additional transactions to purchase more tickets.
     uint private constant MAX_TICKET_PURCHASE = 10_000;
+    
+    // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
+    // Note that the player always receives the entire "bonusPrizePool" amount.
+    uint private constant OPERATOR_CUT = 10;
 
+    /*
+        Chainlink
+    */
+
+    uint32 private constant CHAINLINK_CALLBACK_GAS_LIMIT = 200_000; // This was chosen experimentally.
+    uint private constant CHAINLINK_MINIMUM_RESERVE = 40 * 10 ** CHAINLINK_TOKEN_DECIMALS; // 40 LINK
+    uint16 private constant CHAINLINK_REQUEST_CONFIRMATION_BLOCKS = 200; // About 10 minutes. Use the maximum allowed value of 200 blocks to be extra secure.
+    uint16 private constant CHAINLINK_REQUEST_RETRY_BLOCKS = 600; // About 30 minutes. If we request a random number but don't get it after 600 blocks, we can make a new request.
+    uint private constant CHAINLINK_RETRY_MAX = 10;
+    address private constant CHAINLINK_TOKEN_ADDRESS = 0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06;
+    uint private constant CHAINLINK_TOKEN_DECIMALS = 18;
+    address private constant CHAINLINK_WRAPPER_ADDRESS = 0x699d428ee890d55D56d5FC6e26290f3247A762bd;
+
+    /*
+    *
+    *
+        Private Variables
+    *
+    *
+    */
+    
     // A lock variable to prevent reentrancy. Note that the lock is global, so a function using the lock cannot call another function that is also using the lock.
     bool private lockFlag;
 
@@ -165,8 +217,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     // Currently, the only known possible bad state would be caused by Chainlink being permanently down.
     bool private corruptContractFlag;
     uint private corruptContractBlockNumber;
-    uint private constant CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS = 864_000; // About 30 days.
-
+    
     // The current lottery number.
     uint private lotteryNumber;
 
@@ -218,19 +269,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     mapping(uint => uint) private map_lotteryNum2WinnerPrize;
 
     // Chainlink token and VRF info.
-    address private constant CHAINLINK_TOKEN_ADDRESS = 0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06;
-    address private constant CHAINLINK_WRAPPER_ADDRESS = 0x699d428ee890d55D56d5FC6e26290f3247A762bd;
-
-    uint private constant CHAINLINK_TOKEN_DECIMALS = 18;
-    uint private constant CHAINLINK_MINIMUM_RESERVE = 40 * 10 ** CHAINLINK_TOKEN_DECIMALS; // 40 LINK
-
-    uint32 private constant CHAINLINK_CALLBACK_GAS_LIMIT = 200_000; // This was chosen experimentally.
-    uint16 private constant CHAINLINK_REQUEST_CONFIRMATION_BLOCKS = 200; // About 10 minutes. Use the maximum allowed value of 200 blocks to be extra secure.
-    uint16 private constant CHAINLINK_REQUEST_RETRY_BLOCKS = 600; // About 30 minutes. If we request a random number but don't get it after 600 blocks, we can make a new request.
-
     uint private chainlinkRetryCounter;
-    uint private constant CHAINLINK_RETRY_MAX = 10;
-
+    
     bool private chainlinkRequestIdFlag;
     uint private chainlinkRequestIdBlockNumber;
     uint private chainlinkRequestIdLotteryNumber;
@@ -585,7 +625,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function isSelfDestructReady() private view returns (bool) {
         // If this function returns true, the owner is allowed to call "selfdestruct" and withdraw the entire contract balance.
-        // To ensure the owner cannot just run away with prize money, we require all of the following to be true:
+        // To ensure the owner cannot just run away with prize funds, we require all of the following to be true:
         // -> The contract must be corrupt.
         // -> After the contract became corrupt, the owner must wait for a grace period to pass. This gives everyone a chance to withdraw any funds owed to them.
         return isCorruptContract() && !isCorruptContractGracePeriod();
