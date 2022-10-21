@@ -156,7 +156,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     // This is the maximum number of tickets that can be purchased in a single transaction.
     // Note that players can use additional transactions to purchase more tickets.
-    uint private constant MAX_TICKET_PURCHASE = 10000;
+    uint private constant MAX_TICKET_PURCHASE = 10_000;
 
     // A lock variable to prevent reentrancy. Note that the lock is global, so a function using the lock cannot call another function that is also using the lock.
     bool private lockFlag;
@@ -165,7 +165,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     // Currently, the only known possible bad state would be caused by Chainlink being permanently down.
     bool private corruptContractFlag;
     uint private corruptContractBlockNumber;
-    uint private constant CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS = 864000; // About 30 days.
+    uint private constant CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS = 864_000; // About 30 days.
 
     // The current lottery number.
     uint private lotteryNumber;
@@ -224,7 +224,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     uint private constant CHAINLINK_TOKEN_DECIMALS = 18;
     uint private constant CHAINLINK_MINIMUM_RESERVE = 40 * 10 ** CHAINLINK_TOKEN_DECIMALS; // 40 LINK
 
-    uint32 private constant CHAINLINK_CALLBACK_GAS_LIMIT = 200000; // This was chosen experimentally.
+    uint32 private constant CHAINLINK_CALLBACK_GAS_LIMIT = 200_000; // This was chosen experimentally.
     uint16 private constant CHAINLINK_REQUEST_CONFIRMATION_BLOCKS = 200; // About 10 minutes. Use the maximum allowed value of 200 blocks to be extra secure.
     uint16 private constant CHAINLINK_REQUEST_RETRY_BLOCKS = 600; // About 30 minutes. If we request a random number but don't get it after 600 blocks, we can make a new request.
 
