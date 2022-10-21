@@ -224,7 +224,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     uint private constant CHAINLINK_TOKEN_DECIMALS = 18;
     uint private constant CHAINLINK_MINIMUM_RESERVE = 40 * 10 ** CHAINLINK_TOKEN_DECIMALS; // 40 LINK
 
-    uint32 private constant CHAINLINK_CALLBACK_GAS_LIMIT = 100000; // This was chosen experimentally.
+    uint32 private constant CHAINLINK_CALLBACK_GAS_LIMIT = 200000; // This was chosen experimentally.
     uint16 private constant CHAINLINK_REQUEST_CONFIRMATION_BLOCKS = 200; // About 10 minutes. Use the maximum allowed value of 200 blocks to be extra secure.
     uint16 private constant CHAINLINK_REQUEST_RETRY_BLOCKS = 600; // About 30 minutes. If we request a random number but don't get it after 600 blocks, we can make a new request.
 
