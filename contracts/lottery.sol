@@ -152,11 +152,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     // Note that the player always receives the entire "bonusPrizePool" amount.
-    uint private constant operatorCut = 10;
+    uint private constant OPERATOR_CUT = 10;
 
     // This is the maximum number of tickets that can be purchased in a single transaction.
     // Note that players can use additional transactions to purchase more tickets.
-    uint private constant maxTicketPurchase = 10000;
+    uint private constant MAX_TICKET_PURCHASE = 10000;
 
     // A lock variable to prevent reentrancy. Note that the lock is global, so a function using the lock cannot call another function that is also using the lock.
     bool private lockFlag;
@@ -165,7 +165,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     // Currently, the only known possible bad state would be caused by Chainlink being permanently down.
     bool private corruptContractFlag;
     uint private corruptContractBlockNumber;
-    uint private constant corruptContractGracePeriodBlocks = 864000; // About 30 days.
+    uint private constant CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS = 864000; // About 30 days.
 
     // The current lottery number.
     uint private lotteryNumber;
@@ -218,17 +218,18 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     mapping(uint => uint) private map_lotteryNum2WinnerPrize;
 
     // Chainlink token and VRF info.
-    uint private constant chainlinkMinimumReserve = 40e18; // 40 LINK
+    address private constant CHAINLINK_TOKEN_ADDRESS = 0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06;
+    address private constant CHAINLINK_WRAPPER_ADDRESS = 0x699d428ee890d55D56d5FC6e26290f3247A762bd;
 
-    address private constant chainlinkTokenAddress = 0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06;
-    address private constant chainlinkWrapperAddress = 0x699d428ee890d55D56d5FC6e26290f3247A762bd;
+    uint private constant CHAINLINK_TOKEN_DECIMALS = 18;
+    uint private constant CHAINLINK_MINIMUM_RESERVE = 40 * 10 ** CHAINLINK_TOKEN_DECIMALS; // 40 LINK
 
-    uint32 private constant chainlinkCallbackGasLimit = 100000; // This was chosen experimentally.
-    uint16 private constant chainlinkRequestConfirmationBlocks = 200; // About 10 minutes. Use the maximum allowed value of 200 blocks to be extra secure.
-    uint16 private constant chainlinkRequestRetryBlocks = 600; // About 30 minutes. If we request a random number but don't get it after 600 blocks, we can make a new request.
+    uint32 private constant CHAINLINK_CALLBACK_GAS_LIMIT = 100000; // This was chosen experimentally.
+    uint16 private constant CHAINLINK_REQUEST_CONFIRMATION_BLOCKS = 200; // About 10 minutes. Use the maximum allowed value of 200 blocks to be extra secure.
+    uint16 private constant CHAINLINK_REQUEST_RETRY_BLOCKS = 600; // About 30 minutes. If we request a random number but don't get it after 600 blocks, we can make a new request.
 
     uint private chainlinkRetryCounter;
-    uint private constant chainlinkRetryMax = 10;
+    uint private constant CHAINLINK_RETRY_MAX = 10;
 
     bool private chainlinkRequestIdFlag;
     uint private chainlinkRequestIdBlockNumber;
@@ -242,7 +243,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         Contract Functions
     */
 
-    constructor(uint initialLotteryActiveBlocks, uint initialTicketPrice) VRFV2WrapperConsumerBase(chainlinkTokenAddress, chainlinkWrapperAddress) payable {
+    constructor(uint initialLotteryActiveBlocks, uint initialTicketPrice) VRFV2WrapperConsumerBase(CHAINLINK_TOKEN_ADDRESS, CHAINLINK_WRAPPER_ADDRESS) payable {
         addContractFunds(msg.value);
 
         setOwnerAddress(msg.sender);
@@ -284,8 +285,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         // Purchase as many tickets as possible for the address with the provided value. Note that tickets can only be purchased in whole number quantities.
         // After spending all the funds on tickets, anything left over will be added to the address's claimable balance.
         uint numTickets = value / currentTicketPrice;
-        if(numTickets > maxTicketPurchase) {
-            revert MaxTicketPurchaseError(numTickets, maxTicketPurchase);
+        if(numTickets > MAX_TICKET_PURCHASE) {
+            revert MaxTicketPurchaseError(numTickets, MAX_TICKET_PURCHASE);
         }
 
         uint totalTicketValue = numTickets * currentTicketPrice;
@@ -340,7 +341,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         else {
             // Give the lottery operator their cut of the pot, and then give the rest to the randomly chosen winner.
             winningAddress = findWinningAddress(winningTicket);
-            operatorPrize = playerPrizePool * operatorCut / 100;
+            operatorPrize = playerPrizePool * OPERATOR_CUT / 100;
             winnerPrize = playerPrizePool + bonusPrizePool - operatorPrize;
         }
 
@@ -513,7 +514,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
 
         // At a certain point we must conclude that Chainlink is down and give up. Don't allow for additional attempts because they cost Chainlink tokens.
-        if(chainlinkRetryCounter > chainlinkRetryMax) {
+        if(chainlinkRetryCounter > CHAINLINK_RETRY_MAX) {
             setCorruptContract(true);
             return;
         }
@@ -523,12 +524,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         chainlinkRequestIdFlag = true;
         chainlinkRequestIdBlockNumber = block.number;
         chainlinkRequestIdLotteryNumber = lotteryNumber;
-        chainlinkRequestId = requestRandomness(chainlinkCallbackGasLimit, chainlinkRequestConfirmationBlocks, 1);
+        chainlinkRequestId = requestRandomness(CHAINLINK_CALLBACK_GAS_LIMIT, CHAINLINK_REQUEST_CONFIRMATION_BLOCKS, 1);
     }
 
     function isRetryPermitted() private view returns (bool) {
         // We allow for a redraw if the random number has not been received after a certain number of blocks. This would be needed if Chainlink ever experiences an outage.
-        return block.number - chainlinkRequestIdBlockNumber > chainlinkRequestRetryBlocks;
+        return block.number - chainlinkRequestIdBlockNumber > CHAINLINK_REQUEST_RETRY_BLOCKS;
     }
 
     function fulfillRandomWords(uint requestId, uint[] memory randomWords) internal override {
@@ -619,12 +620,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         // For Chainlink, we honor the minimum reserve requirement. For any other token, just withdraw the entire balance.
         uint tokenBalance = getTokenBalance(tokenAddress);
 
-        if(tokenAddress == chainlinkTokenAddress) {
-            if(tokenBalance >= chainlinkMinimumReserve) {
-                tokenBalance -= chainlinkMinimumReserve;
+        if(tokenAddress == CHAINLINK_TOKEN_ADDRESS) {
+            if(tokenBalance >= CHAINLINK_MINIMUM_RESERVE) {
+                tokenBalance -= CHAINLINK_MINIMUM_RESERVE;
             }
             else {
-                revert ChainlinkMinimumReserveError(chainlinkMinimumReserve);
+                revert ChainlinkMinimumReserveError(CHAINLINK_MINIMUM_RESERVE);
             }
         }
 
@@ -633,7 +634,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function withdrawAllChainlink(address _address) private {
         // Withdraw all Chainlink, including the minimum reserve.
-        tokenTransferToAddress(chainlinkTokenAddress, _address, getTokenBalance(chainlinkTokenAddress));
+        tokenTransferToAddress(CHAINLINK_TOKEN_ADDRESS, _address, getTokenBalance(CHAINLINK_TOKEN_ADDRESS));
     }
 
     function getAccountedContractBalance() private view returns (uint) {
@@ -840,8 +841,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function getRemainingCorruptContractGracePeriodBlocks() private view returns (uint) {
         uint numBlocksPassed = block.number - corruptContractBlockNumber;
-        if(numBlocksPassed <= corruptContractGracePeriodBlocks) {
-            return corruptContractGracePeriodBlocks - numBlocksPassed;
+        if(numBlocksPassed <= CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS) {
+            return CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS - numBlocksPassed;
         }
         else {
             return 0;
@@ -879,19 +880,19 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice Returns an integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     /// @return An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     function constant_operatorCut() external pure returns (uint) {
-        return operatorCut;
+        return OPERATOR_CUT;
     }
 
     /// @notice Returns the maximum number of tickets that can be purchased in a single transaction.
     /// @return The maximum number of tickets that can be purchased in a single transaction.
     function constant_maxTicketPurchase() external pure returns (uint) {
-        return maxTicketPurchase;
+        return MAX_TICKET_PURCHASE;
     }
 
     /// @notice Returns the total grace period blocks.
     /// @return The total grace period blocks.
     function constant_corruptContractGracePeriodBlocks() external pure returns (uint) {
-        return corruptContractGracePeriodBlocks;
+        return CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS;
     }
 
     /// @notice Returns whether the contract is currently locked.
@@ -1306,24 +1307,17 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
     
     /// @notice The owner can call this to get information about the internal state of the contract.
-    function diagnostic_getInternalInfo1() external view returns (uint _operatorCut, uint _maxTicketPurchase, bool _lockFlag, bool _corruptContractFlag, uint _corruptContractBlockNumber, uint _corruptContractGracePeriodBlocks, uint _lotteryNumber, uint _lotteryBlockNumberStart, uint _lotteryActiveBlocks, uint _currentLotteryActiveBlocks, address _ownerAddress, address _operatorAddress) {
+    function diagnostic_getInternalInfo1() external view returns (bool _lockFlag, bool _corruptContractFlag, uint _corruptContractBlockNumber, uint _lotteryNumber, uint _lotteryBlockNumberStart, uint _lotteryActiveBlocks, uint _currentLotteryActiveBlocks, address _ownerAddress, address _operatorAddress, uint _ticketPrice, uint _currentTicketPrice, uint _contractFunds) {
         requireOwnerAddress(msg.sender);
 
-        return(operatorCut, maxTicketPurchase, lockFlag, corruptContractFlag, corruptContractBlockNumber, corruptContractGracePeriodBlocks, lotteryNumber, lotteryBlockNumberStart, lotteryActiveBlocks, currentLotteryActiveBlocks, ownerAddress, operatorAddress);
+        return(lockFlag, corruptContractFlag, corruptContractBlockNumber, lotteryNumber, lotteryBlockNumberStart, lotteryActiveBlocks, currentLotteryActiveBlocks, ownerAddress, operatorAddress, ticketPrice, currentTicketPrice, contractFunds);
     }
 
     /// @notice The owner can call this to get information about the internal state of the contract.
-    function diagnostic_getInternalInfo2() external view returns (uint _ticketPrice, uint _currentTicketPrice, uint _contractFunds, uint _playerPrizePool, uint _bonusPrizePool, uint _claimableBalancePool, uint _refundPool, uint _currentTicketNumber, uint _chainlinkRetryCounter, uint _chainlinkRetryMax, bool _chainlinkRequestIdFlag, uint _chainlinkRequestIdBlockNumber) {
+    function diagnostic_getInternalInfo2() external view returns (uint _playerPrizePool, uint _bonusPrizePool, uint _claimableBalancePool, uint _refundPool, uint _currentTicketNumber, uint _chainlinkRetryCounter, bool _chainlinkRequestIdFlag, uint _chainlinkRequestIdBlockNumber, uint _chainlinkRequestIdLotteryNumber, uint _chainlinkRequestId, bool _winningTicketFlag, uint _winningTicket) {
         requireOwnerAddress(msg.sender);
 
-        return(ticketPrice, currentTicketPrice, contractFunds, playerPrizePool, bonusPrizePool, claimableBalancePool, refundPool, currentTicketNumber, chainlinkRetryCounter, chainlinkRetryMax, chainlinkRequestIdFlag, chainlinkRequestIdBlockNumber);
-    }
-
-    /// @notice The owner can call this to get information about the internal state of the contract.
-    function diagnostic_getInternalInfo3() external view returns (uint _chainlinkRequestIdLotteryNumber, uint _chainlinkRequestId, bool _winningTicketFlag, uint _winningTicket) {
-        requireOwnerAddress(msg.sender);
-
-        return(chainlinkRequestIdLotteryNumber, chainlinkRequestId, winningTicketFlag, winningTicket);
+        return(playerPrizePool, bonusPrizePool, claimableBalancePool, refundPool, currentTicketNumber, chainlinkRetryCounter, chainlinkRequestIdFlag, chainlinkRequestIdBlockNumber, chainlinkRequestIdLotteryNumber, chainlinkRequestId, winningTicketFlag, winningTicket);
     }
 
     /// @notice The owner can call this to unlock the contract.
