@@ -172,6 +172,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice A record of the owner address changing.
     event OwnerChanged(address indexed oldOwnerAddress, address indexed newOwnerAddress);
 
+    /// @notice A record of the contract failing a validation check.
+    event ValidationFailed(uint checkNumber);
+
     /// @notice A record of a winning ticket being drawn.
     event WinningTicketDrawn(uint indexed winningTicket, uint indexed totalTickets);
 
@@ -182,6 +185,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     *
     *
     */
+
+    /*
+        Contract Constants
+    */
+
+    // The identifier of the chain that this contract is meant to be deployed on.
+    uint CHAIN_ID = 97; // BSC Testnet
 
     /*
         Lottery Constants
@@ -302,6 +312,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     constructor(uint initialLotteryActiveBlocks, uint initialTicketPrice) VRFV2WrapperConsumerBase(CHAINLINK_TOKEN_ADDRESS, CHAINLINK_WRAPPER_ADDRESS) payable {
+        assert(block.chainid == CHAIN_ID);
+
         addContractFunds(msg.value);
 
         setOwnerAddress(msg.sender);
@@ -1090,6 +1102,42 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /*
+        Validation Functions
+    */
+
+    function validate() private {
+        if(block.chainid != CHAIN_ID) {
+            setCorruptContract(true);
+            emit ValidationFailed(1);
+            return;
+        }
+
+        if(lockFlag) {
+            setCorruptContract(true);
+            emit ValidationFailed(2);
+            return;
+        }
+
+        if(getAccountedContractBalance() > getContractBalance()) {
+            setCorruptContract(true);
+            emit ValidationFailed(3);
+            return;
+        }
+
+        if(getTotalTickets() * ticketPrice != playerPrizePool) {
+            setCorruptContract(true);
+            emit ValidationFailed(4);
+            return;
+        }
+
+        if(currentTicketNumber != 0 && map_ticket2Address[0] == address(0)) {
+            setCorruptContract(true);
+            emit ValidationFailed(5);
+            return;
+        }
+    }
+
+    /*
     *
     *
         External Functions
@@ -1366,7 +1414,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     /// @notice Returns whether the address is playing in the current lottery.
-    /// @param _address The address that we are checking whether it is playing.
+    /// @param _address The address that we are checking.
     /// @return Whether the address is playing in the current lottery.
     function query_isAddressPlaying(address _address) external view returns (bool) {
         return isAddressPlaying(_address);
@@ -1403,33 +1451,38 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice Returns whether the address is the operator address.
+    /// @param _address The address that we are checking.
     /// @return Whether the address is the operator address.
-    function query_isOperatorAddress() external view returns (bool) {
-        return isOperatorAddress(msg.sender);
+    function query_isOperatorAddress(address _address) external view returns (bool) {
+        return isOperatorAddress(_address);
     }
 
     /// @notice Returns whether the address is the operator successor address.
+    /// @param _address The address that we are checking.
     /// @return Whether the address is the operator successor address.
-    function query_isOperatorSuccessorAddress() external view returns (bool) {
-        return isOperatorSuccessorAddress(msg.sender);
+    function query_isOperatorSuccessorAddress(address _address) external view returns (bool) {
+        return isOperatorSuccessorAddress(_address);
     }
 
     /// @notice Returns whether the address is the owner address.
+    /// @param _address The address that we are checking.
     /// @return Whether the address is the owner address.
-    function query_isOwnerAddress() external view returns (bool) {
-        return isOwnerAddress(msg.sender);
+    function query_isOwnerAddress(address _address) external view returns (bool) {
+        return isOwnerAddress(_address);
     }
 
     /// @notice Returns whether the address is the owner successor address.
+    /// @param _address The address that we are checking.
     /// @return Whether the address is the owner successor address.
-    function query_isOwnerSuccessorAddress() external view returns (bool) {
-        return isOwnerSuccessorAddress(msg.sender);
+    function query_isOwnerSuccessorAddress(address _address) external view returns (bool) {
+        return isOwnerSuccessorAddress(_address);
     }
 
     /// @notice Returns whether the address is an eligible player address.
+    /// @param _address The address that we are checking.
     /// @return Whether the address is an eligible player address.
-    function query_isPlayerAddress() external view returns (bool) {
-        return isPlayerAddress(msg.sender);
+    function query_isPlayerAddress(address _address) external view returns (bool) {
+        return isPlayerAddress(_address);
     }
 
     /// @notice Returns whether a retry of drawing a winning ticket is permitted.
@@ -1475,7 +1528,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice Returns the claimable balance of the address.
-    /// @param _address The address that we are checking the claimable balance for.
+    /// @param _address The address that we are checking.
     /// @return The claimable balance of the address.
     function get_addressClaimableBalance(address _address) external view returns (uint) {
         return getAddressClaimableBalance(_address);
@@ -1483,21 +1536,21 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice Returns the refund the address is entitled to if a lottery is canceled.
     /// @param _lotteryNumber The number of a lottery.
-    /// @param _address The address that we are checking the refund for.
+    /// @param _address The address that we are checking.
     /// @return The refund the address is entitled to.
     function get_addressRefund(uint _lotteryNumber, address _address) external view returns (uint) {
         return getAddressRefund(_lotteryNumber, _address);
     }
 
     /// @notice Returns the predicted number of times that the address will win out of 100 times, truncated to an integer. This is equivalent to the percentage probability of the address winning.
-    /// @param _address The address that we are checking the win chance for.
+    /// @param _address The address that we are checking.
     /// @return The predicted number of times that the address will win out of 100 times.
     function get_addressWinChanceOutOf100(address _address) external view returns (uint) {
         return getAddressWinChanceOutOf(_address, 100);
     }
 
     /// @notice Returns the predicted number of times that the address will win out of N times, truncated to an integer. This function can be used to get extra digits in the answer that would normally get truncated.
-    /// @param _address The address that we are checking the win chance for.
+    /// @param _address The address that we are checking.
     /// @param N The total number of times that we want to know how many times the address will win out of.
     /// @return The predicted number of times that the address will win out of N times.
     function get_addressWinChanceOutOf(address _address, uint N) external view returns (uint) {
@@ -1661,7 +1714,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice Returns the number of tickets an address has in the current lottery.
-    /// @param _address The address that we are checking the number of tickets for.
+    /// @param _address The address that we are checking.
     /// @return The number of tickets the address has in the current lottery.
     function get_totalAddressTickets(address _address) external view returns (uint) {
         return getTotalAddressTickets(_address);
@@ -1765,5 +1818,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requireOwnerAddress(msg.sender);
 
         setLocked(false);
+    }
+
+    /// @notice The owner can call this to validate the contract. If the contract's state is inconsistent, it will be marked as corrupt.
+    function failsafe_validate() external {
+        requireOwnerAddress(msg.sender);
+
+        validate();
     }
 }
