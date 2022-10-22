@@ -181,7 +181,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     /*
-        Lottery
+        Lottery Constants
     */
 
     // The grace period that everyone has to withdraw their funds before the owner can destroy a corrupt contract.
@@ -192,22 +192,23 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     uint private constant MAX_TICKET_PURCHASE = 10_000;
     
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
-    // Note that the player always receives the entire "bonusPrizePool" amount.
+    // Note that the winner always receives the entire "bonusPrizePool" amount.
     uint private constant OPERATOR_CUT = 10;
 
     /*
-        Chainlink
+        Chainlink Constants
     */
+
+    address private constant CHAINLINK_TOKEN_ADDRESS = 0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06;
+    address private constant CHAINLINK_WRAPPER_ADDRESS = 0x699d428ee890d55D56d5FC6e26290f3247A762bd;
 
     uint32 private constant CHAINLINK_CALLBACK_GAS_LIMIT = 200_000; // This was chosen experimentally.
     uint private constant CHAINLINK_MINIMUM_RESERVE = 40 * 10 ** CHAINLINK_TOKEN_DECIMALS; // 40 LINK
     uint16 private constant CHAINLINK_REQUEST_CONFIRMATION_BLOCKS = 200; // About 10 minutes. Use the maximum allowed value of 200 blocks to be extra secure.
-    uint16 private constant CHAINLINK_REQUEST_RETRY_BLOCKS = 600; // About 30 minutes. If we request a random number but don't get it after 600 blocks, we can make a new request.
+    uint16 private constant CHAINLINK_REQUEST_RETRY_BLOCKS = 600; // About 30 minutes.
     uint private constant CHAINLINK_RETRY_MAX = 10;
-    address private constant CHAINLINK_TOKEN_ADDRESS = 0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06;
     uint private constant CHAINLINK_TOKEN_DECIMALS = 18;
-    address private constant CHAINLINK_WRAPPER_ADDRESS = 0x699d428ee890d55D56d5FC6e26290f3247A762bd;
-
+    
     /*
     *
     *
@@ -215,77 +216,72 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     *
     *
     */
-    
-    // A lock variable to prevent reentrancy. Note that the lock is global, so a function using the lock cannot call another function that is also using the lock.
-    bool private lockFlag;
 
-    // If the contract is in a bad state, the owner is allowed to take emergency actions. This is designed to allow emergencies to be remedied without allowing anyone to steal the contract funds.
-    // Currently, the only known possible bad state would be caused by Chainlink being permanently down.
-    bool private corruptContractFlag;
-    uint private corruptContractBlockNumber;
-    
-    // The current lottery number.
-    uint private lotteryNumber;
+    /*
+        Contract Variables
+    */
 
-    // Block number where the lottery started.
-    uint private lotteryBlockNumberStart;
-
-    // The number of blocks where the lottery is active and players may purchase tickets.
-    // If the amount is changed, the new amount will only apply to future lotteries, not the current one.
-    uint private lotteryActiveBlocks;
-    uint private currentLotteryActiveBlocks;
-
-    // The owner is the original operator and is able to assign themselves the operator role at any time.
+    address private operatorAddress;
+    address private operatorSuccessorAddress;
     address private ownerAddress;
     address private ownerSuccessorAddress;
 
-    // The operator is responsible for running the lottery. In return, they will receive a cut of each prize.
-    address private operatorAddress;
-    address private operatorSuccessorAddress;
+    bool private corruptContractFlag;
+    bool private lockFlag;
 
-    // The price of each ticket. If the price is changed, the new price will only apply to future lotteries, not the current one.
-    uint private ticketPrice;
-    uint private currentTicketPrice;
+    uint private corruptContractBlockNumber;
 
-    /* To ensure the safety of player funds, the contract balance is accounted for by splitting it into different places:
-        // contractFunds - The general funds owned by the contract. The operator can add or withdraw funds at will.
-        // playerPrizePool - The funds players have paid to purchase tickets. The operator cannot add or withdraw funds.
-        // bonusPrizePool - The funds that have optionally been added to "sweeten the pot" and provide a bigger prize. The operator can add funds but cannot withdraw them.
-        // claimableBalancePool - The funds that have not yet been claimed. The operator takes their cut from here, but otherwise they cannot add or withdraw funds.
-        // refundPool - The funds that were in the playerPrizePool for a lottery that was canceled. Players can manually request refunds for any tickets they have purchased.
-       Anything else not accounted for is considered to be "extra" funds that are treated the same as contract funds.
+    /*
+        Fund Variables
     */
-    uint private contractFunds;
-    uint private playerPrizePool;
+
+    /*
+        To ensure the safety of player funds, the contract balance is accounted for by splitting it into different places:
+          bonusPrizePool - The funds that have optionally been added to "sweeten the pot" and provide a bigger prize. The operator can add funds but cannot withdraw them.
+          claimableBalancePool - The funds that have not yet been claimed. The operator takes their cut from here, but otherwise they cannot add or withdraw funds.
+          contractFunds - The general funds owned by the contract. The operator can add or withdraw funds at will.
+          playerPrizePool - The funds players have paid to purchase tickets. The operator cannot add or withdraw funds.
+          refundPool - The funds that were in the playerPrizePool for a lottery that was canceled. Players can manually request refunds for any tickets they have purchased.
+        Anything else not accounted for is considered to be "extra" funds that are treated the same as contract funds.
+    */
     uint private bonusPrizePool;
     uint private claimableBalancePool;
+    uint private contractFunds;
+    uint private playerPrizePool;
     uint private refundPool;
 
-    // Variables to keep track of who is playing and how many tickets they have.
-    uint private currentTicketNumber;
-    mapping(uint => address) private map_ticket2Address;
-    mapping(uint => mapping(address => uint)) private map_lotteryNum2Address2NumTickets;
-    mapping(uint => bool) private map_lotteryNum2IsRefundable;
-
-    // Mapping of addresses to claimable balances.
-    // For players, this balance is from winnings or from leftover funds after purchasing tickets.
-    // For the operator, this balance is from their cut of the prize.
-    mapping(address => uint) private map_address2ClaimableBalance;
-
-    // Mappings that show the winning addresses and prizes for each lottery.
-    mapping(uint => address) private map_lotteryNum2WinningAddress;
-    mapping(uint => uint) private map_lotteryNum2WinnerPrize;
-
-    // Chainlink token and VRF info.
-    uint private chainlinkRetryCounter;
-    
-    bool private chainlinkRequestIdFlag;
-    uint private chainlinkRequestIdBlockNumber;
-    uint private chainlinkRequestIdLotteryNumber;
-    uint private chainlinkRequestId;
+    /*
+        Lottery Variables
+    */
 
     bool private winningTicketFlag;
+
+    uint private currentLotteryActiveBlocks;
+    uint private currentTicketNumber;
+    uint private currentTicketPrice;
+    uint private lotteryActiveBlocks;
+    uint private lotteryBlockNumberStart;
+    uint private lotteryNumber;
+    uint private ticketPrice;
     uint private winningTicket;
+
+    mapping(address => uint) private map_address2ClaimableBalance;
+    mapping(uint => address) private map_ticket2Address;
+    mapping(uint => address) private map_lotteryNum2WinningAddress;
+    mapping(uint => bool) private map_lotteryNum2IsRefundable;
+    mapping(uint => uint) private map_lotteryNum2WinnerPrize;
+    mapping(uint => mapping(address => uint)) private map_lotteryNum2Address2NumTickets;
+
+    /*
+        Chainlink Variables
+    */
+
+    bool private chainlinkRequestIdFlag;
+    
+    uint private chainlinkRequestId;
+    uint private chainlinkRequestIdBlockNumber;
+    uint private chainlinkRequestIdLotteryNumber;
+    uint private chainlinkRetryCounter;
 
     /*
     *
@@ -365,8 +361,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function cancelCurrentLottery(uint value) private {
         // Mark the current lottery as refundable and start a new lottery.
+        // For recordkeeping purposes, the winner is the zero address and the prize is zero.
         map_lotteryNum2IsRefundable[lotteryNumber] = true;
-        emit LotteryCancel(lotteryNumber, lotteryBlockNumberStart);
 
         // Move funds in the player prize pool to the refund pool. Players who have purchased tickets may request a refund manually.
         addRefundPool(playerPrizePool);
@@ -375,9 +371,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         // Carry over the existing bonus prize pool and add in the penalty value.
         addBonusPrizePool(value);
 
-        // For recordkeeping purposes, the winner is the zero address and the prize is zero.
-        map_lotteryNum2WinningAddress[lotteryNumber] = address(0);
-        map_lotteryNum2WinnerPrize[lotteryNumber] = 0;
+        emit LotteryCancel(lotteryNumber, lotteryBlockNumberStart);
 
         startNewLottery();
     }
@@ -402,7 +396,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
 
         if(isZeroPlayerGame() || isOnePlayerGame()) {
-            // Don't bother paying Chainlink since we don't need a random number anyway.
+            // Don't bother paying Chainlink for a random number.
             recordWinningTicket(0);
         }
         else {
@@ -503,10 +497,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
         lotteryNumber++;
         lotteryBlockNumberStart = block.number;
+        winningTicketFlag = false;
 
         chainlinkRetryCounter = 0;
         chainlinkRequestIdFlag = false;
-        winningTicketFlag = false;
 
         emit LotteryStart(lotteryNumber, lotteryBlockNumberStart, lotteryActiveBlocks, ticketPrice);
     }
@@ -653,10 +647,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function isSelfDestructReady() private view returns (bool) {
-        // If this function returns true, the owner is allowed to call "selfdestruct" and withdraw the entire contract balance.
-        // To ensure the owner cannot just run away with prize funds, we require all of the following to be true:
-        // -> The contract must be corrupt.
-        // -> After the contract became corrupt, the owner must wait for a grace period to pass. This gives everyone a chance to withdraw any funds owed to them.
+        /*
+            If this function returns true, the owner is allowed to call "selfdestruct" and withdraw the entire contract balance.
+            To ensure the owner cannot just run away with prize funds, we require all of the following to be true:
+              The contract must be corrupt.
+              After the contract became corrupt, the owner must wait for a grace period to pass. This gives everyone a chance to withdraw any funds owed to them.
+        */
         return isCorruptContract() && !isCorruptContractGracePeriod();
     }
 
@@ -934,20 +930,17 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     function setCorruptContract(bool _isCorruptContract) private {
-        if(_isCorruptContract) {
-            // Do not allow "isCorruptBlock" to keep increasing or multiple events to be issued.
-            if(!corruptContractFlag) {
-                corruptContractFlag = true;
-                corruptContractBlockNumber = block.number;
+        if(_isCorruptContract != corruptContractFlag) {
+            corruptContractFlag = _isCorruptContract;
 
+            if(_isCorruptContract) {
+                corruptContractBlockNumber = block.number;
                 emit Corruption(block.number);
             }
-        }
-        else {
-            corruptContractFlag = false;
-            corruptContractBlockNumber = 0;
-
-            emit CorruptionReset(block.number);
+            else {
+                corruptContractBlockNumber = 0;
+                emit CorruptionReset(block.number);
+            }
         }
     }
 
@@ -961,8 +954,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function setOperatorAddress(address _address) private {
-        emit OperatorChanged(operatorAddress, _address);
-        operatorAddress = _address;
+        if(_address != operatorAddress) {
+            emit OperatorChanged(operatorAddress, _address);
+            operatorAddress = _address;
+        }
     }
 
     function setOperatorSuccessorAddress(address _address) private {
@@ -970,8 +965,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
     
     function setOwnerAddress(address _address) private {
-        emit OwnerChanged(ownerAddress, _address);
-        ownerAddress = _address;
+        if(_address != ownerAddress) {
+            emit OwnerChanged(ownerAddress, _address);
+            ownerAddress = _address;
+        }
     }
 
     function setOwnerSuccessorAddress(address _address) private {
