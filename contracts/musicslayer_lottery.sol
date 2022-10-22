@@ -89,14 +89,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice Drawing a winning ticket is not allowed at this time.
     error DrawWinningTicketError();
 
-    /// @notice This contract does not have the funds requested.
-    error InsufficientFundsError(uint requestedValue, uint operatorContractBalance);
-
     /// @notice The current lottery is active.
     error LotteryActiveError();
 
     /// @notice The current lottery is not active.
     error LotteryInactiveError();
+
+    /// @notice The lottery is not canceled.
+    error LotteryNotCanceledError(uint lotteryNumber);
 
     /// @notice This transaction is attempting to purchase too many tickets.
     error MaxTicketPurchaseError(uint requestedTicketPurchase, uint maxTicketPurchase);
@@ -139,6 +139,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice A winning ticket has already been drawn.
     error WinningTicketDrawnError();
+
+    /// @notice The withdraw is not allowed.
+    error WithdrawError(uint requestedValue, uint operatorContractBalance);
     
     /*
     *
@@ -161,7 +164,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     event LotteryEnd(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart, address indexed winnerAddress, uint winnerPrize);
 
     /// @notice A record of a lottery starting.
-    event LotteryStart(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart, uint indexed lotteryBlockDuration, uint ticketPrice);
+    event LotteryStart(uint indexed lotteryNumber, uint indexed lotteryBlockNumberStart, uint indexed lotteryActiveBlocks, uint ticketPrice);
 
     /// @notice A record of the operator address changing.
     event OperatorChanged(address indexed oldOperatorAddress, address indexed newOperatorAddress);
@@ -257,19 +260,20 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     bool private winningTicketFlag;
 
-    uint private currentLotteryActiveBlocks;
     uint private currentTicketNumber;
-    uint private currentTicketPrice;
     uint private lotteryActiveBlocks;
     uint private lotteryBlockNumberStart;
     uint private lotteryNumber;
+    uint private nextLotteryActiveBlocks;
+    uint private nextTicketPrice;
     uint private ticketPrice;
     uint private winningTicket;
 
     mapping(address => uint) private map_address2ClaimableBalance;
     mapping(uint => address) private map_ticket2Address;
     mapping(uint => address) private map_lotteryNum2WinnerAddress;
-    mapping(uint => bool) private map_lotteryNum2IsRefundable;
+    mapping(uint => bool) private map_lotteryNum2IsCanceled;
+    mapping(uint => uint) private map_lotteryNum2TicketPrice;
     mapping(uint => uint) private map_lotteryNum2WinnerPrize;
     mapping(uint => mapping(address => uint)) private map_lotteryNum2Address2NumTickets;
 
@@ -281,8 +285,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     
     uint private chainlinkRequestId;
     uint private chainlinkRequestIdBlockNumber;
-    uint private chainlinkRequestIdLotteryNumber;
     uint private chainlinkRetryCounter;
+
+    mapping(uint => uint) private map_chainlinkRequestId2LotteryNum;
 
     /*
     *
@@ -304,8 +309,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         setOperatorAddress(msg.sender);
         setOperatorSuccessorAddress(msg.sender);
 
-        lotteryActiveBlocks = initialLotteryActiveBlocks;
-        ticketPrice = initialTicketPrice;
+        setLotteryActiveBlocks(initialLotteryActiveBlocks);
+        setTicketPrice(initialTicketPrice);
 
         startNewLottery();
     }
@@ -339,31 +344,32 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function buyTickets(address _address, uint value) private {
         // Purchase as many tickets as possible for the address with the provided value. Note that tickets can only be purchased in whole number quantities.
         // After spending all the funds on tickets, anything left over will be added to the address's claimable balance.
-        uint numTickets = value / currentTicketPrice;
+        uint numTickets = value / ticketPrice;
         if(numTickets > MAX_TICKET_PURCHASE) {
             revert MaxTicketPurchaseError(numTickets, MAX_TICKET_PURCHASE);
         }
 
-        uint totalTicketValue = numTickets * currentTicketPrice;
+        uint totalTicketValue = numTickets * ticketPrice;
         uint unspentValue = value - totalTicketValue;
 
         addPlayerPrizePool(totalTicketValue);
         addAddressClaimableBalance(_address, unspentValue);
+
+        map_lotteryNum2Address2NumTickets[lotteryNumber][_address] += numTickets;
         
         // To save gas, only write the information for the first purchased ticket, and then every 100 afterwards.
-        uint lastTicketNumber = currentTicketNumber + numTickets;
-        for(uint i = currentTicketNumber; i < lastTicketNumber; i += 100) {
+        uint endTicketNumber = currentTicketNumber + numTickets;
+        for(uint i = currentTicketNumber; i < endTicketNumber; i += 100) {
             map_ticket2Address[i] = _address;
         }
 
-        map_lotteryNum2Address2NumTickets[lotteryNumber][_address] += numTickets;
-        currentTicketNumber = lastTicketNumber;
+        currentTicketNumber = endTicketNumber;
     }
 
     function cancelCurrentLottery(uint value) private {
         // Mark the current lottery as refundable and start a new lottery.
         // For recordkeeping purposes, the winner is the zero address and the prize is zero.
-        map_lotteryNum2IsRefundable[lotteryNumber] = true;
+        map_lotteryNum2IsCanceled[lotteryNumber] = true;
 
         // Move funds in the player prize pool to the refund pool. Players who have purchased tickets may request a refund manually.
         addRefundPool(playerPrizePool);
@@ -404,8 +410,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             chainlinkRetryCounter++;
             chainlinkRequestIdFlag = true;
             chainlinkRequestIdBlockNumber = block.number;
-            chainlinkRequestIdLotteryNumber = lotteryNumber;
             chainlinkRequestId = requestRandomness(CHAINLINK_CALLBACK_GAS_LIMIT, CHAINLINK_REQUEST_CONFIRMATION_BLOCKS, 1);
+
+            map_chainlinkRequestId2LotteryNum[chainlinkRequestId] = lotteryNumber;
         }
     }
 
@@ -475,11 +482,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             revert ChainlinkVRFRequestIdMismatch(requestId, chainlinkRequestId);
         }
 
-        if(chainlinkRequestIdLotteryNumber != lotteryNumber) {
-            revert ChainlinkVRFRequestStale(chainlinkRequestIdLotteryNumber, lotteryNumber);
+        if(map_chainlinkRequestId2LotteryNum[requestId] != lotteryNumber) {
+            revert ChainlinkVRFRequestStale(map_chainlinkRequestId2LotteryNum[requestId], lotteryNumber);
         }
 
-        // This function will not be called if "currentTicketNumber" is zero.
+        // This function will not be called if the total number of tickets is zero.
         recordWinningTicket(randomWords[0] % getTotalTickets());
     }
 
@@ -494,8 +501,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         currentTicketNumber = 0;
 
         // If any of these values have been changed by the operator, update them now before starting the next lottery.
-        currentLotteryActiveBlocks = lotteryActiveBlocks;
-        currentTicketPrice = ticketPrice;
+        updateLotteryActiveBlocks();
+        updateTicketPrice();
 
         lotteryNumber++;
         lotteryBlockNumberStart = block.number;
@@ -504,7 +511,17 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         chainlinkRetryCounter = 0;
         chainlinkRequestIdFlag = false;
 
+        map_lotteryNum2TicketPrice[lotteryNumber] = ticketPrice;
+
         emit LotteryStart(lotteryNumber, lotteryBlockNumberStart, lotteryActiveBlocks, ticketPrice);
+    }
+
+    function updateLotteryActiveBlocks() private {
+        lotteryActiveBlocks = nextLotteryActiveBlocks;
+    }
+
+    function updateTicketPrice() private {
+        ticketPrice = nextTicketPrice;
     }
 
     /*
@@ -545,16 +562,15 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         bonusPrizePool -= value;
     }
 
-    //function subtractContractFunds(uint value) private {
-    //    contractFunds -= value;
-    //}
+    function subtractContractFunds(uint value) private {
+        contractFunds -= value;
+    }
 
     function subtractPlayerPrizePool(uint value) private {
         playerPrizePool -= value;
     }
 
-    function subtractRefundPool(uint _lotteryNumber, address _address, uint value) private {
-        map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] -= value;
+    function subtractRefundPool(uint value) private {
         refundPool -= value;
     }
 
@@ -572,7 +588,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function withdrawAddressRefund(uint _lotteryNumber, address _address) private {
         // We only allow the entire balance to be withdrawn.
         uint balance = getAddressRefund(_lotteryNumber, _address);
-        subtractRefundPool(_lotteryNumber, _address, balance);
+        subtractRefundPool(balance);
+
+        map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] = 0;
+        
         transferToAddress(_address, balance);
     }
 
@@ -582,8 +601,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function withdrawAllContractFunds(address _address) private {
         // Withdraw the entire contract funds. For the purposes of this function, extra funds are treated as contract funds.
-        contractFunds = 0;
-        transferToAddress(_address, getOperatorContractBalance());
+        uint operatorContractBalance = getOperatorContractBalance();
+        subtractContractFunds(operatorContractBalance);
+        transferToAddress(_address, operatorContractBalance);
     }
 
     function withdrawAllTokenBalance(address tokenAddress, address _address) private {
@@ -596,15 +616,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function withdrawContractFunds(address _address, uint value) private {
         // Withdraw an amount from the contract funds. For the purposes of this function, extra funds are treated as contract funds.
-        uint operatorContractBalance = getOperatorContractBalance();
-
-        if(value > operatorContractBalance) {
-            revert InsufficientFundsError(value, operatorContractBalance);
-        }
-
-        // Only if the value is higher than the extra funds do we subtract from "contractFunds". This accounting makes it so extra funds are spent first.
-        if(value > getExtraContractBalance()) {
-            contractFunds -= (value - getExtraContractBalance());
+        uint extraContractBalance = getExtraContractBalance();
+        if(value > extraContractBalance) {
+            // Only if the value is higher than the extra funds do we subtract from "contractFunds". This accounting makes it so extra funds are spent first.
+            subtractContractFunds(value - extraContractBalance);
         }
         transferToAddress(_address, value);
     }
@@ -635,6 +650,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function isLotteryActive() private view returns (bool) {
         return getRemainingLotteryActiveBlocks() != 0;
+    }
+
+    function isLotteryCanceled(uint _lotteryNumber) private view returns (bool) {
+        return map_lotteryNum2IsCanceled[_lotteryNumber];
     }
 
     function isOnePlayerGame() private view returns (bool) {
@@ -691,6 +710,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return winningTicketFlag;
     }
 
+    function isWithdrawAllowed(uint value) private view returns (bool) {
+        return value <= getOperatorContractBalance();
+    }
+
     function isZeroPlayerGame() private view returns (bool) {
         // If no tickets were purchased, then there cannot be any players.
         return currentTicketNumber == 0;
@@ -703,6 +726,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function requireCorruptContract() private view {
         if(!isCorruptContract()) {
             revert NotCorruptContractError();
+        }
+    }
+
+    function requireLotteryCanceled(uint _lotteryNumber) private view {
+        if(!isLotteryCanceled(_lotteryNumber)) {
+            revert LotteryNotCanceledError(_lotteryNumber);
         }
     }
 
@@ -784,6 +813,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
     }
 
+    function requireWithdrawAllowed(uint value) private view {
+        if(!isWithdrawAllowed(value)) {
+            revert WithdrawError(value, getOperatorContractBalance());
+        }
+    }
+
     /*
         Get Functions
     */
@@ -797,13 +832,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function getAddressRefund(uint _lotteryNumber, address _address) private view returns (uint) {
-        if(map_lotteryNum2IsRefundable[_lotteryNumber]) {
-            return map_lotteryNum2Address2NumTickets[_lotteryNumber][_address]; ////////// BAD This needs to take into account ticket price...!
-        }
-        else {
-            // The lottery was not canceled so there are no refunds.
-            return 0;
-        }
+        return map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] * map_lotteryNum2TicketPrice[_lotteryNumber];
     }
 
     function getAddressWinChanceOutOf(address _address, uint N) private view returns (uint) {
@@ -848,7 +877,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function getLotteryActiveBlocks() private view returns (uint) {
-        return currentLotteryActiveBlocks;
+        return lotteryActiveBlocks;
     }
 
     function getLotteryBlockNumberStart() private view returns (uint) {
@@ -857,6 +886,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function getLotteryNumber() private view returns (uint) {
         return lotteryNumber;
+    }
+
+    function getLotteryTicketPrice(uint _lotteryNumber) private view returns (uint) {
+        return map_lotteryNum2TicketPrice[_lotteryNumber];
     }
 
     function getLotteryWinnerAddress(uint _lotteryNumber) private view returns (address) {
@@ -916,8 +949,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function getRemainingLotteryActiveBlocks() private view returns (uint) {
         uint numBlocksPassed = block.number - lotteryBlockNumberStart;
-        if(numBlocksPassed <= currentLotteryActiveBlocks) {
-            return currentLotteryActiveBlocks - numBlocksPassed;
+
+        if(numBlocksPassed <= lotteryActiveBlocks) {
+            return lotteryActiveBlocks - numBlocksPassed;
         }
         else {
             return 0;
@@ -925,7 +959,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function getTicketPrice() private view returns (uint) {
-        return currentTicketPrice;
+        return ticketPrice;
     }
 
     function getTokenBalance(address tokenAddress) private view returns (uint) {
@@ -973,9 +1007,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lockFlag = _isLocked;
     }
 
-    function setLotteryActiveBlocks(uint newLotteryActiveBlocks) private {
+    function setLotteryActiveBlocks(uint _nextLotteryActiveBlocks) private {
         // Do not set the current active lottery blocks here. When the next lottery starts, the current active lottery blocks will be updated.
-        lotteryActiveBlocks = newLotteryActiveBlocks;
+        nextLotteryActiveBlocks = _nextLotteryActiveBlocks;
     }
 
     function setOperatorAddress(address _address) private {
@@ -1000,9 +1034,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         ownerSuccessorAddress = _address;
     }
 
-    function setTicketPrice(uint newTicketPrice) private {
+    function setTicketPrice(uint _nextTicketPrice) private {
         // Do not set the current ticket price here. When the next lottery starts, the current ticket price will be updated.
-        ticketPrice = newTicketPrice;
+        nextTicketPrice = _nextTicketPrice;
     }
 
     /*
@@ -1212,10 +1246,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         unlock();
     }
 
-    /// @notice Anyone can call this to withdraw a refund.
-    /// @param _lotteryNumber The number of a lottery that was canceled.
+    /// @notice Anyone can call this to withdraw a refund if a lottery is canceled.
+    /// @param _lotteryNumber The number of a lottery.
     function withdraw_addressRefund(uint _lotteryNumber) external {
         lock();
+
+        requireLotteryCanceled(_lotteryNumber);
 
         withdrawAddressRefund(_lotteryNumber, msg.sender);
 
@@ -1239,6 +1275,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock();
 
         requireOperatorAddress(msg.sender);
+        requireWithdrawAllowed(getOperatorContractBalance());
 
         withdrawAllContractFunds(msg.sender);
 
@@ -1277,6 +1314,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock();
 
         requireOperatorAddress(msg.sender);
+        requireWithdrawAllowed(value);
 
         withdrawContractFunds(msg.sender, value);
 
@@ -1295,13 +1333,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         unlock();
     }
 
-    /// @notice The operator can trigger a refund withdraw for someone else.
-    /// @param _lotteryNumber The number of a lottery that was canceled.
+    /// @notice The operator can trigger a refund withdraw for someone else if a lottery is canceled.
+    /// @param _lotteryNumber The number of a lottery.
     /// @param _address The address that the operator is triggering the refund withdraw for.
     function withdraw_otherAddressRefund(uint _lotteryNumber, address _address) external {
         lock();
 
         requireOperatorAddress(msg.sender);
+        requireLotteryCanceled(_lotteryNumber);
 
         withdrawAddressRefund(_lotteryNumber, _address);
 
@@ -1442,8 +1481,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return getAddressClaimableBalance(_address);
     }
 
-    /// @notice Returns the refund the address is entitled to.
-    /// @param _lotteryNumber The number of a lottery that was canceled.
+    /// @notice Returns the refund the address is entitled to if a lottery is canceled.
+    /// @param _lotteryNumber The number of a lottery.
     /// @param _address The address that we are checking the refund for.
     /// @return The refund the address is entitled to.
     function get_addressRefund(uint _lotteryNumber, address _address) external view returns (uint) {
@@ -1520,15 +1559,22 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return getLotteryNumber();
     }
 
+    /// @notice Returns the ticket price of a lottery.
+    /// @param _lotteryNumber The number of a lottery.
+    /// @return The ticket price of a lottery.
+    function get_lotteryTicketPrice(uint _lotteryNumber) external view returns (uint) {
+        return getLotteryTicketPrice(_lotteryNumber);
+    }
+
     /// @notice Returns the winner's address of a lottery.
-    /// @param _lotteryNumber The number of a lottery that has already finished.
+    /// @param _lotteryNumber The number of a lottery.
     /// @return The winner's address of a lottery.
     function get_lotteryWinnerAddress(uint _lotteryNumber) external view returns (address) {
         return getLotteryWinnerAddress(_lotteryNumber);
     }
 
     /// @notice Returns the winner's prize of a lottery.
-    /// @param _lotteryNumber The number of a lottery that has already finished.
+    /// @param _lotteryNumber The number of a lottery.
     /// @return The winner's prize of a lottery.
     function get_lotteryWinnerPrize(uint _lotteryNumber) external view returns (uint) {
         return getLotteryWinnerPrize(_lotteryNumber);
@@ -1660,17 +1706,31 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     /// @notice The owner can call this to get information about the internal state of the contract.
-    function diagnostic_getInternalInfo1() external view returns (bool _lockFlag, bool _corruptContractFlag, uint _corruptContractBlockNumber, uint _lotteryNumber, uint _lotteryBlockNumberStart, uint _lotteryActiveBlocks, uint _currentLotteryActiveBlocks, address _ownerAddress, address _operatorAddress, uint _ticketPrice, uint _currentTicketPrice, uint _contractFunds) {
+    function diagnostic_contractVariables() external view returns (address _operatorAddress, address _operatorSuccessorAddress, address _ownerAddress, address _ownerSuccessorAddress, bool _corruptContractFlag, bool _lockFlag, uint _corruptContractBlockNumber) {
         requireOwnerAddress(msg.sender);
 
-        return(lockFlag, corruptContractFlag, corruptContractBlockNumber, lotteryNumber, lotteryBlockNumberStart, lotteryActiveBlocks, currentLotteryActiveBlocks, ownerAddress, operatorAddress, ticketPrice, currentTicketPrice, contractFunds);
+        return(operatorAddress, operatorSuccessorAddress, ownerAddress, ownerSuccessorAddress, corruptContractFlag, lockFlag, corruptContractBlockNumber);
     }
 
     /// @notice The owner can call this to get information about the internal state of the contract.
-    function diagnostic_getInternalInfo2() external view returns (uint _playerPrizePool, uint _bonusPrizePool, uint _claimableBalancePool, uint _refundPool, uint _currentTicketNumber, uint _chainlinkRetryCounter, bool _chainlinkRequestIdFlag, uint _chainlinkRequestIdBlockNumber, uint _chainlinkRequestIdLotteryNumber, uint _chainlinkRequestId, bool _winningTicketFlag, uint _winningTicket) {
+    function diagnostic_fundVariables() external view returns (uint _bonusPrizePool, uint _claimableBalancePool, uint _contractFunds, uint _playerPrizePool, uint _refundPool) {
         requireOwnerAddress(msg.sender);
 
-        return(playerPrizePool, bonusPrizePool, claimableBalancePool, refundPool, currentTicketNumber, chainlinkRetryCounter, chainlinkRequestIdFlag, chainlinkRequestIdBlockNumber, chainlinkRequestIdLotteryNumber, chainlinkRequestId, winningTicketFlag, winningTicket);
+        return(bonusPrizePool, claimableBalancePool, contractFunds, playerPrizePool, refundPool);
+    }
+
+    /// @notice The owner can call this to get information about the internal state of the contract.
+    function diagnostic_lotteryVariables() external view returns (bool _winningTicketFlag, uint _currentTicketNumber, uint _lotteryActiveBlocks, uint _lotteryBlockNumberStart, uint _lotteryNumber, uint _nextLotteryActiveBlocks, uint _nextTicketPrice, uint _ticketPrice, uint _winningTicket) {
+        requireOwnerAddress(msg.sender);
+
+        return(winningTicketFlag, currentTicketNumber, lotteryActiveBlocks, lotteryBlockNumberStart, lotteryNumber, nextLotteryActiveBlocks, nextTicketPrice, ticketPrice, winningTicket);
+    }
+
+    /// @notice The owner can call this to get information about the internal state of the contract.
+    function diagnostic_chainlinkVariables() external view returns (bool _chainlinkRequestIdFlag, uint _chainlinkRequestId, uint _chainlinkRequestIdBlockNumber, uint _chainlinkRetryCounter) {
+        requireOwnerAddress(msg.sender);
+
+        return(chainlinkRequestIdFlag, chainlinkRequestId, chainlinkRequestIdBlockNumber, chainlinkRetryCounter);
     }
 
     /*
