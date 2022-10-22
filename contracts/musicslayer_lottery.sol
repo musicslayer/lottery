@@ -670,7 +670,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function isOnePlayerGame() private view returns (bool) {
         // Check to see if there is only one player who has purchased all the tickets.
-        return currentTicketNumber != 0 && (getTotalAddressTickets(map_ticket2Address[0]) == getTotalTickets());
+        return currentTicketNumber != 0 && (getAddressTickets(map_ticket2Address[0]) == getTotalTickets());
     }
 
     function isOperatorAddress(address _address) private view returns (bool) {
@@ -847,8 +847,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] * map_lotteryNum2TicketPrice[_lotteryNumber];
     }
 
+    function getAddressTickets(address _address) private view returns (uint) {
+        return map_lotteryNum2Address2NumTickets[lotteryNumber][_address];
+    }
+
     function getAddressWinChanceOutOf(address _address, uint N) private view returns (uint) {
-        return getTotalAddressTickets(_address) * N / getTotalTickets();
+        return getAddressTickets(_address) * N / getTotalTickets();
     }
 
     function getAllowedTokenWithdrawBalance(address tokenAddress) private view returns (uint) {
@@ -976,10 +980,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function getTokenBalance(address tokenAddress) private view returns (uint) {
         return IERC20(tokenAddress).balanceOf(address(this));
-    }
-
-    function getTotalAddressTickets(address _address) private view returns (uint) {
-        return map_lotteryNum2Address2NumTickets[lotteryNumber][_address];
     }
 
     function getTokenMinimumReserve(address tokenAddress) private view returns (uint) {
@@ -1542,6 +1542,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return getAddressRefund(_lotteryNumber, _address);
     }
 
+    /// @notice Returns the number of tickets an address has in the current lottery.
+    /// @param _address The address that we are checking.
+    /// @return The number of tickets the address has in the current lottery.
+    function get_addressTickets(address _address) external view returns (uint) {
+        return getAddressTickets(_address);
+    }
+
     /// @notice Returns the predicted number of times that the address will win out of 100 times, truncated to an integer. This is equivalent to the percentage probability of the address winning.
     /// @param _address The address that we are checking.
     /// @return The predicted number of times that the address will win out of 100 times.
@@ -1711,13 +1718,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @return The minimum reserve requirement of a token.
     function get_tokenMinimumReserve(address tokenAddress) external view returns (uint) {
         return getTokenMinimumReserve(tokenAddress);
-    }
-
-    /// @notice Returns the number of tickets an address has in the current lottery.
-    /// @param _address The address that we are checking.
-    /// @return The number of tickets the address has in the current lottery.
-    function get_totalAddressTickets(address _address) external view returns (uint) {
-        return getTotalAddressTickets(_address);
     }
 
     /// @notice Returns the total number of tickets in the current lottery.
