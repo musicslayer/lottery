@@ -113,10 +113,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice The calling address is not the operator successor.
     error NotOperatorSuccessorError(address _address, address operatorSuccessorAddress);
 
-    /// @notice The calling address is not the contract owner.
+    /// @notice The calling address is not the owner.
     error NotOwnerError(address _address, address ownerAddress);
 
-    /// @notice The calling address is not the contract owner successor.
+    /// @notice The calling address is not the owner successor.
     error NotOwnerSuccessorError(address _address, address ownerSuccessorAddress);
 
     /// @notice The calling address is not an eligible player.
