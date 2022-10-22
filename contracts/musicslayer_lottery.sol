@@ -250,13 +250,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /*
         To ensure the safety of player funds, the contract balance is accounted for by splitting it into different places:
-          bonusPrizePool - The funds that have optionally been added to "sweeten the pot" and provide a bigger prize. The operator can add funds but cannot withdraw them.
-          claimableBalancePool - The funds that have not yet been claimed. The operator takes their cut from here, but otherwise they cannot add or withdraw funds.
-          contractFunds - The general funds owned by the contract. The operator can add or withdraw funds at will.
-          playerPrizePool - The funds players have paid to purchase tickets. The operator cannot add or withdraw funds.
-          refundPool - The funds that were in the playerPrizePool for a lottery that was canceled. Players can manually request refunds for any tickets they have purchased.
-        Anything else not accounted for is considered to be "extra" funds that are treated the same as contract funds.
-        Also note that tokens are not included in this accounting.
+          bonusPrizePool - The funds that have optionally been added to "sweeten the pot" and provide a bigger prize.
+          claimableBalancePool - The funds that have not yet been claimed.
+          contractFunds - The general funds owned by the contract.
+          playerPrizePool - The funds players have paid to purchase tickets.
+          refundPool - The funds that were in the playerPrizePool for a lottery that was canceled.
+        Anything else not accounted for is considered to be extra funds. Note that tokens are not included in this accounting.
+        The operator can only withdraw from the contract funds and the extra funds.
     */
     uint private bonusPrizePool;
     uint private claimableBalancePool;
