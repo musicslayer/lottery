@@ -110,8 +110,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice The calling address is not the operator.
     error NotOperatorError(address _address, address operatorAddress);
 
+    /// @notice The calling address is not the operator successor.
+    error NotOperatorSuccessorError(address _address, address operatorSuccessorAddress);
+
     /// @notice The calling address is not the contract owner.
     error NotOwnerError(address _address, address ownerAddress);
+
+    /// @notice The calling address is not the contract owner successor.
+    error NotOwnerSuccessorError(address _address, address ownerSuccessorAddress);
 
     /// @notice The calling address is not an eligible player.
     error NotPlayerError(address _address);
@@ -231,9 +237,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     // The owner is the original operator and is able to assign themselves the operator role at any time.
     address private ownerAddress;
+    address private ownerSuccessorAddress;
 
     // The operator is responsible for running the lottery. In return, they will receive a cut of each prize.
     address private operatorAddress;
+    address private operatorSuccessorAddress;
 
     // The price of each ticket. If the price is changed, the new price will only apply to future lotteries, not the current one.
     uint private ticketPrice;
@@ -295,7 +303,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         addContractFunds(msg.value);
 
         setOwnerAddress(msg.sender);
+        setOwnerSuccessorAddress(msg.sender);
         setOperatorAddress(msg.sender);
+        setOperatorSuccessorAddress(msg.sender);
 
         lotteryActiveBlocks = initialLotteryActiveBlocks;
         ticketPrice = initialTicketPrice;
@@ -372,6 +382,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         startNewLottery();
     }
 
+    function claimOperatorRole(address _address) private {
+        setOperatorAddress(_address);
+    }
+
+    function claimOwnerRole(address _address) private {
+        setOwnerAddress(_address);
+    }
+
     function drawWinningTicket() private {
         if(winningTicketFlag || (chainlinkRequestIdFlag && !isRetryPermitted())) {
             revert DrawWinningTicketError();
@@ -429,6 +447,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         emit LotteryEnd(lotteryNumber, lotteryBlockNumberStart, winningAddress, winnerPrize);
 
         startNewLottery();
+    }
+
+    function offerOperatorRole(address _address) private {
+        setOperatorSuccessorAddress(_address);
+    }
+
+    function offerOwnerRole(address _address) private {
+        setOwnerSuccessorAddress(_address);
     }
 
     /*
@@ -604,8 +630,16 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return _address == getOperatorAddress();
     }
 
+    function isOperatorSuccessorAddress(address _address) private view returns (bool) {
+        return _address == getOperatorSuccessorAddress();
+    }
+
     function isOwnerAddress(address _address) private view returns (bool) {
         return _address == getOwnerAddress();
+    }
+
+    function isOwnerSuccessorAddress(address _address) private view returns (bool) {
+        return _address == getOwnerSuccessorAddress();
     }
 
     function isPlayerAddress(address _address) private view returns (bool) {
@@ -679,9 +713,21 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
     }
 
+    function requireOperatorSuccessorAddress(address _address) private view {
+        if(!isOperatorSuccessorAddress(_address)) {
+            revert NotOperatorSuccessorError(_address, getOperatorSuccessorAddress());
+        }
+    }
+
     function requireOwnerAddress(address _address) private view {
         if(!isOwnerAddress(_address)) {
             revert NotOwnerError(_address, getOwnerAddress());
+        }
+    }
+
+    function requireOwnerSuccessorAddress(address _address) private view {
+        if(!isOwnerSuccessorAddress(_address)) {
+            revert NotOwnerSuccessorError(_address, getOwnerSuccessorAddress());
         }
     }
 
@@ -802,12 +848,20 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return operatorAddress;
     }
 
+    function getOperatorSuccessorAddress() private view returns (address) {
+        return operatorSuccessorAddress;
+    }
+
     function getOperatorContractBalance() private view returns (uint) {
         return contractFunds + getExtraContractBalance();
     }
 
     function getOwnerAddress() private view returns (address) {
         return ownerAddress;
+    }
+
+    function getOwnerSuccessorAddress() private view returns (address) {
+        return ownerSuccessorAddress;
     }
 
     function getPenaltyPayment() private view returns (uint) {
@@ -906,14 +960,22 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lotteryActiveBlocks = newLotteryActiveBlocks;
     }
 
-    function setOperatorAddress(address newOperatorAddress) private {
-        emit OperatorChanged(operatorAddress, newOperatorAddress);
-        operatorAddress = newOperatorAddress;
+    function setOperatorAddress(address _address) private {
+        emit OperatorChanged(operatorAddress, _address);
+        operatorAddress = _address;
+    }
+
+    function setOperatorSuccessorAddress(address _address) private {
+        operatorSuccessorAddress = _address;
     }
     
     function setOwnerAddress(address _address) private {
         emit OwnerChanged(ownerAddress, _address);
         ownerAddress = _address;
+    }
+
+    function setOwnerSuccessorAddress(address _address) private {
+        ownerSuccessorAddress = _address;
     }
 
     function setTicketPrice(uint newTicketPrice) private {
@@ -1022,6 +1084,28 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         unlock();
     }
 
+    /// @notice The operator successor can claim the operator role.
+    function action_claimOperatorRole() external {
+        lock();
+
+        requireOperatorSuccessorAddress(msg.sender);
+
+        claimOperatorRole(msg.sender);
+
+        unlock();
+    }
+
+    /// @notice The owner successor can claim the owner role.
+    function action_claimOwnerRole() external {
+        lock();
+
+        requireOwnerSuccessorAddress(msg.sender);
+
+        claimOwnerRole(msg.sender);
+
+        unlock();
+    }
+
     /// @notice Anyone can call this to draw the winning ticket, but only if the current lottery is no longer active.
     function action_drawWinningTicket() external {
         lock();
@@ -1040,6 +1124,30 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requireWinningTicketDrawn();
 
         endCurrentLottery();
+
+        unlock();
+    }
+
+    /// @notice The operator can offer the operator role to a successor address.
+    /// @param _address The operator successor address.
+    function action_offerOperatorRole(address _address) external {
+        lock();
+
+        requireOperatorAddress(msg.sender);
+
+        offerOperatorRole(_address);
+
+        unlock();
+    }
+
+    /// @notice The owner can offer the owner role to a successor address.
+    /// @param _address The owner successor address.
+    function action_offerOwnerRole(address _address) external {
+        lock();
+
+        requireOwnerAddress(msg.sender);
+
+        offerOwnerRole(_address);
 
         unlock();
     }
@@ -1240,10 +1348,22 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return isOperatorAddress(msg.sender);
     }
 
+    /// @notice Returns whether the address is the operator successor address.
+    /// @return Whether the address is the operator successor address.
+    function query_isOperatorSuccessorAddress() external view returns (bool) {
+        return isOperatorSuccessorAddress(msg.sender);
+    }
+
     /// @notice Returns whether the address is the owner address.
     /// @return Whether the address is the owner address.
     function query_isOwnerAddress() external view returns (bool) {
         return isOwnerAddress(msg.sender);
+    }
+
+    /// @notice Returns whether the address is the owner successor address.
+    /// @return Whether the address is the owner successor address.
+    function query_isOwnerSuccessorAddress() external view returns (bool) {
+        return isOwnerSuccessorAddress(msg.sender);
     }
 
     /// @notice Returns whether the address is an eligible player address.
@@ -1405,10 +1525,22 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return getOperatorContractBalance();
     }
 
+    /// @notice Returns the current operator successor address.
+    /// @return The current operator successor address.
+    function get_operatorSuccessorAddress() external view returns (address) {
+        return getOperatorSuccessorAddress();
+    }
+
     /// @notice Returns the current owner address.
     /// @return The current owner address.
     function get_ownerAddress() external view returns (address) {
         return getOwnerAddress();
+    }
+
+    /// @notice Returns the current owner successor address.
+    /// @return The current owner successor address.
+    function get_ownerSuccessorAddress() external view returns (address) {
+        return getOwnerSuccessorAddress();
     }
 
     /// @notice Returns the current penalty the operator must pay to cancel the current lottery.
@@ -1490,30 +1622,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         unlock();
     }
 
-    /// @notice The operator can assign the operator role to a new address.
-    /// @param newOperatorAddress The new operator address.
-    function set_operatorAddress(address newOperatorAddress) external {
-        lock();
-
-        requireOperatorAddress(msg.sender);
-
-        setOperatorAddress(newOperatorAddress);
-
-        unlock();
-    }
-
-    /// @notice The owner can transfer ownership to a new address.
-    /// @param newOwnerAddress The new owner address.
-    function set_ownerAddress(address newOwnerAddress) external {
-        lock();
-
-        requireOwnerAddress(msg.sender);
-
-        setOwnerAddress(newOwnerAddress);
-
-        unlock();
-    }
-
     /// @notice The operator can change the ticket price of the lottery. This change will go into effect starting from the next lottery.
     /// @param newTicketPrice The new ticket price of the lottery.
     function set_ticketPrice(uint newTicketPrice) external {
@@ -1561,6 +1669,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requireOwnerAddress(msg.sender);
 
         setOperatorAddress(msg.sender);
+        setOperatorSuccessorAddress(msg.sender);
     }
 
     /// @notice The owner can call this to uncorrupt the contract. This should only be done if the currupt flag being set was a false positive.
