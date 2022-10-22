@@ -617,9 +617,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function withdrawAllContractFunds(address _address) private {
         // Withdraw the entire contract funds. For the purposes of this function, extra funds are treated as contract funds.
-        uint operatorContractBalance = getOperatorContractBalance();
-        subtractContractFunds(operatorContractBalance);
-        transferToAddress(_address, operatorContractBalance);
+        subtractContractFunds(contractFunds);
+        transferToAddress(_address, getOperatorContractBalance());
     }
 
     function withdrawAllTokenBalance(address tokenAddress, address _address) private {
@@ -634,7 +633,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         // Withdraw an amount from the contract funds. For the purposes of this function, extra funds are treated as contract funds.
         uint extraContractBalance = getExtraContractBalance();
         if(value > extraContractBalance) {
-            // Only if the value is higher than the extra funds do we subtract from "contractFunds". This accounting makes it so extra funds are spent first.
+            // Only if the value is higher than the extra funds do we subtract from "contractFunds". This accounting makes it so extra funds are withdrawn first.
             subtractContractFunds(value - extraContractBalance);
         }
         transferToAddress(_address, value);
