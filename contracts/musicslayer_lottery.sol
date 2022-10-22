@@ -191,7 +191,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     // The identifier of the chain that this contract is meant to be deployed on.
-    uint CHAIN_ID = 97; // BSC Testnet
+    uint private constant CHAIN_ID = 97; // BSC Testnet
 
     /*
         Lottery Constants
@@ -436,10 +436,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
         if(isZeroPlayerGame()) {
             // No one played. For recordkeeping purposes, the winner is the zero address and the prize is zero.
+            winnerAddress = address(0);
+            operatorPrize = 0;
+            winnerPrize = 0;
         }
         else if(isOnePlayerGame()) {
             // Since only one person has played, just give them the entire prize.
             winnerAddress = map_ticket2Address[0];
+            operatorPrize = 0;
             winnerPrize = bonusPrizePool + playerPrizePool;
         }
         else {
