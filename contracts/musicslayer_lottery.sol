@@ -361,13 +361,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             revert MaxTicketPurchaseError(numTickets, MAX_TICKET_PURCHASE);
         }
 
-        uint totalTicketValue = numTickets * ticketPrice;
-        uint unspentValue = value - totalTicketValue;
-
-        addPlayerPrizePool(totalTicketValue);
-        addAddressClaimableBalance(_address, unspentValue);
-
-        map_lotteryNum2Address2NumTickets[lotteryNumber][_address] += numTickets;
+        addAddressTickets(lotteryNumber, _address, numTickets, ticketPrice);
+        addAddressClaimableBalance(_address, value - (numTickets * ticketPrice));
         
         // To save gas, only write the information for the first purchased ticket, and then every 100 afterwards.
         uint endTicketNumber = currentTicketNumber + numTickets;
@@ -549,16 +544,17 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         claimableBalancePool += value;
     }
 
+    function addAddressTickets(uint _lotteryNumber, address _address, uint numTickets, uint _ticketPrice) private {
+        map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] += numTickets;
+        playerPrizePool += numTickets * _ticketPrice;
+    }
+
     function addBonusPrizePool(uint value) private {
         bonusPrizePool += value;
     }
 
     function addContractFunds(uint value) private {
         contractFunds += value;
-    }
-
-    function addPlayerPrizePool(uint value) private {
-        playerPrizePool += value;
     }
 
     function addRefundPool(uint value) private {
@@ -574,6 +570,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         claimableBalancePool -= value;
     }
 
+    function subtractAddressTickets(uint _lotteryNumber, address _address, uint numTickets, uint _ticketPrice) private {
+        map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] -= numTickets;
+        refundPool -= numTickets * _ticketPrice;
+    }
+
     function subtractBonusPrizePool(uint value) private {
         bonusPrizePool -= value;
     }
@@ -584,10 +585,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function subtractPlayerPrizePool(uint value) private {
         playerPrizePool -= value;
-    }
-
-    function subtractRefundPool(uint value) private {
-        refundPool -= value;
     }
 
     /*
@@ -603,12 +600,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function withdrawAddressRefund(uint _lotteryNumber, address _address) private {
         // We only allow the entire balance to be withdrawn.
-        uint balance = getAddressRefund(_lotteryNumber, _address);
-        subtractRefundPool(balance);
+        uint numTickets = getAddressTickets(_lotteryNumber, _address);
+        uint _ticketPrice = map_lotteryNum2TicketPrice[_lotteryNumber];
 
-        map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] = 0;
-        
-        transferToAddress(_address, balance);
+        subtractAddressTickets(_lotteryNumber, _address, numTickets, _ticketPrice);
+        transferToAddress(_address, numTickets * _ticketPrice);
     }
 
     function withdrawAllChainlinkBalance(address _address) private {
@@ -673,7 +669,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function isOnePlayerGame() private view returns (bool) {
         // Check to see if there is only one player who has purchased all the tickets.
-        return currentTicketNumber != 0 && (getAddressTickets(map_ticket2Address[0]) == getTotalTickets());
+        return currentTicketNumber != 0 && (getAddressTickets(lotteryNumber, map_ticket2Address[0]) == getTotalTickets());
     }
 
     function isOperatorAddress(address _address) private view returns (bool) {
@@ -850,12 +846,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] * map_lotteryNum2TicketPrice[_lotteryNumber];
     }
 
-    function getAddressTickets(address _address) private view returns (uint) {
-        return map_lotteryNum2Address2NumTickets[lotteryNumber][_address];
+    function getAddressTickets(uint _lotteryNumber, address _address) private view returns (uint) {
+        return map_lotteryNum2Address2NumTickets[_lotteryNumber][_address];
     }
 
-    function getAddressWinChanceOutOf(address _address, uint N) private view returns (uint) {
-        return getAddressTickets(_address) * N / getTotalTickets();
+    function getAddressWinChanceOutOf(uint _lotteryNumber, address _address, uint N) private view returns (uint) {
+        return getAddressTickets(_lotteryNumber, _address) * N / getTotalTickets();
     }
 
     function getAllowedTokenWithdrawBalance(address tokenAddress) private view returns (uint) {
@@ -1549,14 +1545,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @param _address The address that we are checking.
     /// @return The number of tickets the address has in the current lottery.
     function get_addressTickets(address _address) external view returns (uint) {
-        return getAddressTickets(_address);
+        return getAddressTickets(lotteryNumber, _address);
     }
 
     /// @notice Returns the predicted number of times that the address will win out of 100 times, truncated to an integer. This is equivalent to the percentage probability of the address winning.
     /// @param _address The address that we are checking.
     /// @return The predicted number of times that the address will win out of 100 times.
     function get_addressWinChanceOutOf100(address _address) external view returns (uint) {
-        return getAddressWinChanceOutOf(_address, 100);
+        return getAddressWinChanceOutOf(lotteryNumber, _address, 100);
     }
 
     /// @notice Returns the predicted number of times that the address will win out of N times, truncated to an integer. This function can be used to get extra digits in the answer that would normally get truncated.
@@ -1564,7 +1560,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @param N The total number of times that we want to know how many times the address will win out of.
     /// @return The predicted number of times that the address will win out of N times.
     function get_addressWinChanceOutOf(address _address, uint N) external view returns (uint) {
-        return getAddressWinChanceOutOf(_address, N);
+        return getAddressWinChanceOutOf(lotteryNumber, _address, N);
     }
 
     /// @notice Returns the amount of a token that can be withdrawn.
