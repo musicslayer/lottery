@@ -98,6 +98,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice The lottery is not canceled.
     error LotteryNotCanceledError(uint lotteryNumber);
 
+    /// @notice The ticket price cannot exceed the maximum price.
+    error MaxTicketPriceError(uint requestedTicketPrice, uint maxTicketPrice);
+
     /// @notice This transaction is attempting to purchase too many tickets.
     error MaxTicketPurchaseError(uint requestedTicketPurchase, uint maxTicketPurchase);
 
@@ -202,6 +205,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     // The grace period after the contract becomes corrupt that everyone has to withdraw their funds before the owner can destroy it.
     uint private constant CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS = 864_000; // About 30 days.
+
+    // This is the maximum ticket price that can be set.
+    uint private constant MAX_TICKET_PRICE = 10_000 ether;
 
     // This is the maximum number of tickets that can be purchased in a single transaction.
     // Note that players can use additional transactions to purchase more tickets.
@@ -1068,6 +1074,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         if(_nextTicketPrice == 0) {
             revert ZeroTicketPriceError();
         }
+
+        if(_nextTicketPrice > MAX_TICKET_PRICE) {
+            revert MaxTicketPriceError(_nextTicketPrice, MAX_TICKET_PRICE);
+        }
+
         nextTicketPrice = _nextTicketPrice;
     }
 
