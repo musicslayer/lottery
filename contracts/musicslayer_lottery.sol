@@ -142,6 +142,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice The withdraw is not allowed.
     error WithdrawError(uint requestedValue, uint operatorContractBalance);
+
+    /// @notice A ticket price of zero is not allowed.
+    error ZeroTicketPriceError();
     
     /*
     *
@@ -588,6 +591,18 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /*
+        Deposit Functions
+    */
+
+    function depositBonusPrizePool(uint value) private {
+        addBonusPrizePool(value);
+    }
+
+    function depositContractFunds(uint value) private {
+        addContractFunds(value);
+    }
+
+    /*
         Withdraw Functions
     */
 
@@ -851,7 +866,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function getAddressWinChanceOutOf(address _address, uint N) private view returns (uint) {
-        return getAddressTickets(_address) * N / getTotalTickets();
+        uint totalTickets = getTotalTickets();
+
+        if(totalTickets == 0) {
+            return 0;
+        }
+        else {
+            return getAddressTickets(_address) * N / totalTickets;
+        }
     }
 
     function getAllowedTokenWithdrawBalance(address tokenAddress) private view returns (uint) {
@@ -1043,6 +1065,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function setTicketPrice(uint _nextTicketPrice) private {
         // Do not set the current ticket price here. When the next lottery starts, the current ticket price will be updated.
+        if(_nextTicketPrice == 0) {
+            revert ZeroTicketPriceError();
+        }
         nextTicketPrice = _nextTicketPrice;
     }
 
@@ -1251,27 +1276,27 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /*
-        Add Functions
+        Deposit Functions
     */
 
-    /// @notice Anyone can call this to add funds to the bonus prize pool, but only if the contract is not corrupt.
-    function add_bonusPrizePool() external payable {
+    /// @notice Anyone can call this to deposit funds in the bonus prize pool, but only if the contract is not corrupt.
+    function deposit_bonusPrizePool() external payable {
         lock();
 
         requireNotCorruptContract();
 
-        addBonusPrizePool(msg.value);
+        depositBonusPrizePool(msg.value);
 
         unlock();
     }
 
-    /// @notice The operator can call this to give funds to the contract.
-    function add_contractFunds() external payable {
+    /// @notice The operator can call this to deposit funds in the contract.
+    function deposit_contractFunds() external payable {
         lock();
 
         requireOperatorAddress(msg.sender);
 
-        addContractFunds(msg.value);
+        depositContractFunds(msg.value);
 
         unlock();
     }
