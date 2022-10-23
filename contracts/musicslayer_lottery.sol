@@ -339,7 +339,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         Built-In Functions
     */
 
-    constructor(uint initialLotteryActiveBlocks, uint initialTicketPrice) VRFV2WrapperConsumerBase(CHAINLINK_TOKEN_ADDRESS, CHAINLINK_WRAPPER_ADDRESS) payable {
+    constructor(uint _initialLotteryActiveBlocks, uint _initialTicketPrice) VRFV2WrapperConsumerBase(CHAINLINK_TOKEN_ADDRESS, CHAINLINK_WRAPPER_ADDRESS) payable {
         assert(block.chainid == CHAIN_ID);
 
         updateReferenceBlock();
@@ -351,8 +351,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         setOperatorAddress(msg.sender);
         setOperatorSuccessorAddress(msg.sender);
 
-        setLotteryActiveBlocks(initialLotteryActiveBlocks);
-        setTicketPrice(initialTicketPrice);
+        setLotteryActiveBlocks(_initialLotteryActiveBlocks);
+        setTicketPrice(_initialTicketPrice);
 
         startNewLottery();
     }
@@ -383,31 +383,31 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         Action Functions
     */
 
-    function buyTickets(address _address, uint value) private {
+    function buyTickets(address _address, uint _value) private {
         // Purchase as many tickets as possible for the address with the provided value. Note that tickets can only be purchased in whole number quantities.
         // After spending all the funds on tickets, anything left over will be added to the address's claimable balance.
         uint _currentTicketNumber = currentTicketNumber;
         uint _lotteryNumber = lotteryNumber;
         uint _ticketPrice = ticketPrice;
 
-        uint numTickets = value / _ticketPrice;
-        if(numTickets > MAX_TICKET_PURCHASE) {
-            revert MaxTicketPurchaseError(numTickets, MAX_TICKET_PURCHASE);
+        uint _numTickets = _value / _ticketPrice;
+        if(_numTickets > MAX_TICKET_PURCHASE) {
+            revert MaxTicketPurchaseError(_numTickets, MAX_TICKET_PURCHASE);
         }
 
-        addAddressTickets(_lotteryNumber, _address, numTickets, _ticketPrice);
-        addAddressClaimableBalance(_address, value - (numTickets * _ticketPrice));
+        addAddressTickets(_lotteryNumber, _address, _numTickets, _ticketPrice);
+        addAddressClaimableBalance(_address, _value - (_numTickets * _ticketPrice));
         
         // To save gas, only write the information for the first purchased ticket, and then every 100 afterwards.
-        uint endTicketNumber = _currentTicketNumber + numTickets;
-        for(uint i = _currentTicketNumber; i < endTicketNumber; i += 100) {
-            map_ticket2Address[i] = _address;
+        uint _endTicketNumber = _currentTicketNumber + _numTickets;
+        for(uint _i = _currentTicketNumber; _i < _endTicketNumber; _i += 100) {
+            map_ticket2Address[_i] = _address;
         }
 
-        currentTicketNumber = endTicketNumber;
+        currentTicketNumber = _endTicketNumber;
     }
 
-    function cancelCurrentLottery(uint value) private {
+    function cancelCurrentLottery(uint _value) private {
         // Mark the current lottery as canceled and start a new lottery.
         // For recordkeeping purposes, the winner is the zero address and their prize is zero.
         uint _lotteryNumber = lotteryNumber;
@@ -419,7 +419,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         subtractPlayerPrizePool(playerPrizePool);
 
         // Carry over the existing bonus prize pool and add in the additional value.
-        addBonusPrizePool(value);
+        addBonusPrizePool(_value);
 
         emit LotteryCancel(_lotteryNumber, lotteryBlockNumberStart);
 
@@ -465,32 +465,32 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         uint _bonusPrizePool = bonusPrizePool;
         uint _playerPrizePool = playerPrizePool;
 
-        address winnerAddress;
-        uint winnerPrize;
+        address _winnerAddress;
+        uint _winnerPrize;
 
         if(isZeroPlayerGame()) {
             // No one played. For recordkeeping purposes, the winner is the zero address and their prize is zero.
             // Any balance in the bonus prize pool will be carried over.
-            winnerAddress = address(0);
-            winnerPrize = 0;
+            _winnerAddress = address(0);
+            _winnerPrize = 0;
         }
         else {
-            winnerAddress = findWinnerAddress(winningTicket);
+            _winnerAddress = findWinnerAddress(winningTicket);
 
-            uint operatorPrize = _playerPrizePool * OPERATOR_CUT / 100;
-            winnerPrize = _playerPrizePool + _bonusPrizePool - operatorPrize;
+            uint _operatorPrize = _playerPrizePool * OPERATOR_CUT / 100;
+            _winnerPrize = _playerPrizePool + _bonusPrizePool - _operatorPrize;
 
-            addAddressClaimableBalance(getOperatorAddress(), operatorPrize);
-            addAddressClaimableBalance(winnerAddress, winnerPrize);
+            addAddressClaimableBalance(getOperatorAddress(), _operatorPrize);
+            addAddressClaimableBalance(_winnerAddress, _winnerPrize);
 
             subtractPlayerPrizePool(_playerPrizePool);
             subtractBonusPrizePool(_bonusPrizePool);
         }
 
-        map_lotteryNum2WinnerAddress[_lotteryNumber] = winnerAddress;
-        map_lotteryNum2WinnerPrize[_lotteryNumber] = winnerPrize;
+        map_lotteryNum2WinnerAddress[_lotteryNumber] = _winnerAddress;
+        map_lotteryNum2WinnerPrize[_lotteryNumber] = _winnerPrize;
 
-        emit LotteryEnd(_lotteryNumber, lotteryBlockNumberStart, winnerAddress, winnerPrize);
+        emit LotteryEnd(_lotteryNumber, lotteryBlockNumberStart, _winnerAddress, _winnerPrize);
 
         startNewLottery();
     }
@@ -512,33 +512,33 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         Helper Functions
     */
 
-    function findWinnerAddress(uint ticket) private view returns (address) {
-        address winnerAddress = map_ticket2Address[ticket];
+    function findWinnerAddress(uint _ticket) private view returns (address) {
+        address _winnerAddress = map_ticket2Address[_ticket];
 
         // Because "map_ticket2Address" potentially has gaps, we may have to search until we find the winner address.
         // Note that because of the way "map_ticket2Address" is filled in, element 0 is guaranteed to have a nonzero address if the lottery has at least one player.
-        while(winnerAddress == address(0)) {
-            winnerAddress = map_ticket2Address[--ticket];
+        while(_winnerAddress == address(0)) {
+            _winnerAddress = map_ticket2Address[--_ticket];
         }
 
-        return winnerAddress;
+        return _winnerAddress;
     }
 
     // This function must be "internal" to match the abstract superclass definition.
-    function fulfillRandomWords(uint requestId, uint[] memory randomWords) internal override {
+    function fulfillRandomWords(uint _requestId, uint[] memory _randomWords) internal override {
         // This is the Chainlink VRF callback that will give us the random number we requested.
-        if(chainlinkRequestId != requestId) {
-            revert ChainlinkVRFRequestIdMismatch(requestId, chainlinkRequestId);
+        if(chainlinkRequestId != _requestId) {
+            revert ChainlinkVRFRequestIdMismatch(_requestId, chainlinkRequestId);
         }
 
         uint _lotteryNumber = lotteryNumber;
 
-        if(map_chainlinkRequestId2LotteryNum[requestId] != _lotteryNumber) {
-            revert ChainlinkVRFRequestStale(_lotteryNumber, map_chainlinkRequestId2LotteryNum[requestId]);
+        if(map_chainlinkRequestId2LotteryNum[_requestId] != _lotteryNumber) {
+            revert ChainlinkVRFRequestStale(_lotteryNumber, map_chainlinkRequestId2LotteryNum[_requestId]);
         }
 
         // This function will not be called if the total number of tickets is zero.
-        recordWinningTicket(randomWords[0] % getTotalTickets());
+        recordWinningTicket(_randomWords[0] % getTotalTickets());
     }
 
     function recordWinningTicket(uint _winningTicket) private {
@@ -580,64 +580,64 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         Add Functions
     */
 
-    function addAddressClaimableBalance(address _address, uint value) private {
-        map_address2ClaimableBalance[_address] += value;
-        claimableBalancePool += value;
+    function addAddressClaimableBalance(address _address, uint _value) private {
+        map_address2ClaimableBalance[_address] += _value;
+        claimableBalancePool += _value;
     }
 
-    function addAddressTickets(uint _lotteryNumber, address _address, uint numTickets, uint _ticketPrice) private {
-        map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] += numTickets;
-        playerPrizePool += numTickets * _ticketPrice;
+    function addAddressTickets(uint _lotteryNumber, address _address, uint _numTickets, uint _ticketPrice) private {
+        map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] += _numTickets;
+        playerPrizePool += _numTickets * _ticketPrice;
     }
 
-    function addBonusPrizePool(uint value) private {
-        bonusPrizePool += value;
+    function addBonusPrizePool(uint _value) private {
+        bonusPrizePool += _value;
     }
 
-    function addContractFunds(uint value) private {
-        contractFunds += value;
+    function addContractFunds(uint _value) private {
+        contractFunds += _value;
     }
 
-    function addRefundPool(uint value) private {
-        refundPool += value;
+    function addRefundPool(uint _value) private {
+        refundPool += _value;
     }
 
     /*
         Subtract Functions
     */
 
-    function subtractAddressClaimableBalance(address _address, uint value) private {
-        map_address2ClaimableBalance[_address] -= value;
-        claimableBalancePool -= value;
+    function subtractAddressClaimableBalance(address _address, uint _value) private {
+        map_address2ClaimableBalance[_address] -= _value;
+        claimableBalancePool -= _value;
     }
 
-    function subtractAddressTickets(uint _lotteryNumber, address _address, uint numTickets, uint _ticketPrice) private {
-        map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] -= numTickets;
-        refundPool -= numTickets * _ticketPrice;
+    function subtractAddressTickets(uint _lotteryNumber, address _address, uint _numTickets, uint _ticketPrice) private {
+        map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] -= _numTickets;
+        refundPool -= _numTickets * _ticketPrice;
     }
 
-    function subtractBonusPrizePool(uint value) private {
-        bonusPrizePool -= value;
+    function subtractBonusPrizePool(uint _value) private {
+        bonusPrizePool -= _value;
     }
 
-    function subtractContractFunds(uint value) private {
-        contractFunds -= value;
+    function subtractContractFunds(uint _value) private {
+        contractFunds -= _value;
     }
 
-    function subtractPlayerPrizePool(uint value) private {
-        playerPrizePool -= value;
+    function subtractPlayerPrizePool(uint _value) private {
+        playerPrizePool -= _value;
     }
 
     /*
         Deposit Functions
     */
 
-    function depositBonusPrizePool(uint value) private {
-        addBonusPrizePool(value);
+    function depositBonusPrizePool(uint _value) private {
+        addBonusPrizePool(_value);
     }
 
-    function depositContractFunds(uint value) private {
-        addContractFunds(value);
+    function depositContractFunds(uint _value) private {
+        addContractFunds(_value);
     }
 
     /*
@@ -646,18 +646,18 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function withdrawAddressClaimableBalance(address _address) private {
         // We only allow the entire balance to be withdrawn.
-        uint balance = getAddressClaimableBalance(_address);
-        subtractAddressClaimableBalance(_address, balance);
-        transferToAddress(_address, balance);
+        uint _balance = getAddressClaimableBalance(_address);
+        subtractAddressClaimableBalance(_address, _balance);
+        transferToAddress(_address, _balance);
     }
 
     function withdrawAddressRefund(uint _lotteryNumber, address _address) private {
         // We only allow the entire balance to be withdrawn.
-        uint numTickets = map_lotteryNum2Address2NumTickets[_lotteryNumber][_address];
+        uint _numTickets = map_lotteryNum2Address2NumTickets[_lotteryNumber][_address];
         uint _ticketPrice = map_lotteryNum2TicketPrice[_lotteryNumber];
 
-        subtractAddressTickets(_lotteryNumber, _address, numTickets, _ticketPrice);
-        transferToAddress(_address, numTickets * _ticketPrice);
+        subtractAddressTickets(_lotteryNumber, _address, _numTickets, _ticketPrice);
+        transferToAddress(_address, _numTickets * _ticketPrice);
     }
 
     function withdrawAllChainlinkBalance(address _address) private {
@@ -670,26 +670,26 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         transferToAddress(_address, getOperatorContractBalance());
     }
 
-    function withdrawAllTokenBalance(address tokenAddress, address _address) private {
-        tokenTransferToAddress(tokenAddress, _address, getTokenBalance(tokenAddress));
+    function withdrawAllTokenBalance(address _tokenAddress, address _address) private {
+        tokenTransferToAddress(_tokenAddress, _address, getTokenBalance(_tokenAddress));
     }
 
-    function withdrawChainlinkBalance(address _address, uint value) private {
-        tokenTransferToAddress(CHAINLINK_TOKEN_ADDRESS, _address, value);
+    function withdrawChainlinkBalance(address _address, uint _value) private {
+        tokenTransferToAddress(CHAINLINK_TOKEN_ADDRESS, _address, _value);
     }
 
-    function withdrawContractFunds(address _address, uint value) private {
+    function withdrawContractFunds(address _address, uint _value) private {
         // Withdraw an amount from the contract funds. For the purposes of this function, extra funds are treated as contract funds.
-        uint extraContractBalance = getExtraContractBalance();
-        if(value > extraContractBalance) {
+        uint _extraContractBalance = getExtraContractBalance();
+        if(_value > _extraContractBalance) {
             // Only subtract from "contractFunds" the excess value not covered by extra funds. This accounting makes it so extra funds are withdrawn first.
-            subtractContractFunds(value - extraContractBalance);
+            subtractContractFunds(_value - _extraContractBalance);
         }
-        transferToAddress(_address, value);
+        transferToAddress(_address, _value);
     }
 
-    function withdrawTokenBalance(address tokenAddress, address _address, uint value) private {
-        tokenTransferToAddress(tokenAddress, _address, value);
+    function withdrawTokenBalance(address _tokenAddress, address _address, uint value) private {
+        tokenTransferToAddress(_tokenAddress, _address, value);
     }
 
     /*
@@ -741,9 +741,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return _address == getOwnerSuccessorAddress();
     }
 
-    function isPenaltyPayment(uint value) private view returns (bool) {
+    function isPenaltyPayment(uint _value) private view returns (bool) {
         // We require the penalty payment to be exact so that we don't have to handle the accounting of any excess amount.
-        return value == getPenaltyPayment();
+        return _value == getPenaltyPayment();
     }
 
     function isPlayerAddress(address _address) private view returns (bool) {
@@ -766,16 +766,16 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return isCorruptContract() && !isCorruptContractGracePeriod();
     }
 
-    function isTokenWithdrawAllowed(address tokenAddress, uint value) private view returns (bool) {
-        return value <= getAllowedTokenWithdrawBalance(tokenAddress);
+    function isTokenWithdrawAllowed(address _tokenAddress, uint _value) private view returns (bool) {
+        return _value <= getAllowedTokenWithdrawBalance(_tokenAddress);
     }
 
     function isWinningTicketDrawn() private view returns (bool) {
         return winningTicketFlag;
     }
 
-    function isWithdrawAllowed(uint value) private view returns (bool) {
-        return value <= getOperatorContractBalance();
+    function isWithdrawAllowed(uint _value) private view returns (bool) {
+        return _value <= getOperatorContractBalance();
     }
 
     function isZeroPlayerGame() private view returns (bool) {
@@ -847,9 +847,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
     }
 
-    function requirePenaltyPayment(uint value) private view {
-        if(!isPenaltyPayment(value)) {
-            revert PenaltyPaymentError(value, getPenaltyPayment());
+    function requirePenaltyPayment(uint _value) private view {
+        if(!isPenaltyPayment(_value)) {
+            revert PenaltyPaymentError(_value, getPenaltyPayment());
         }
     }
 
@@ -865,9 +865,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
     }
 
-    function requireTokenWithdrawAllowed(address tokenAddress, uint value) private view {
-        if(!isTokenWithdrawAllowed(tokenAddress, value)) {
-            revert TokenWithdrawError(tokenAddress, value, getTokenBalance(tokenAddress), getTokenMinimumReserve(tokenAddress));
+    function requireTokenWithdrawAllowed(address _tokenAddress, uint _value) private view {
+        if(!isTokenWithdrawAllowed(_tokenAddress, _value)) {
+            revert TokenWithdrawError(_tokenAddress, _value, getTokenBalance(_tokenAddress), getTokenMinimumReserve(_tokenAddress));
         }
     }
 
@@ -877,9 +877,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
     }
 
-    function requireWithdrawAllowed(uint value) private view {
-        if(!isWithdrawAllowed(value)) {
-            revert WithdrawError(value, getOperatorContractBalance());
+    function requireWithdrawAllowed(uint _value) private view {
+        if(!isWithdrawAllowed(_value)) {
+            revert WithdrawError(_value, getOperatorContractBalance());
         }
     }
 
@@ -903,28 +903,28 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return map_lotteryNum2Address2NumTickets[lotteryNumber][_address];
     }
 
-    function getAddressWinTimesOutOf(address _address, uint N) private view returns (uint) {
-        uint totalTickets = getTotalTickets();
+    function getAddressWinTimesOutOf(address _address, uint _N) private view returns (uint) {
+        uint _totalTickets = getTotalTickets();
 
-        if(totalTickets == 0) {
+        if(_totalTickets == 0) {
             return 0;
         }
         else {
-            return getAddressTickets(_address) * N / totalTickets;
+            return getAddressTickets(_address) * _N / _totalTickets;
         }
     }
 
-    function getAllowedTokenWithdrawBalance(address tokenAddress) private view returns (uint) {
+    function getAllowedTokenWithdrawBalance(address _tokenAddress) private view returns (uint) {
         // Note that aside from maintaining any minimum reserve requirements, we also forbid withdrawing an amount higher than the available balance.
         // Even if the token's contract would allow for such a strange withdraw, we do not permit it here.
-        uint tokenBalance = getTokenBalance(tokenAddress);
-        uint reserve = getTokenMinimumReserve(tokenAddress);
+        uint _tokenBalance = getTokenBalance(_tokenAddress);
+        uint _reserve = getTokenMinimumReserve(_tokenAddress);
 
-        if(tokenBalance < reserve) {
+        if(_tokenBalance < _reserve) {
             return 0;
         }
         else {
-            return tokenBalance - reserve;
+            return _tokenBalance - _reserve;
         }
     }
 
@@ -993,11 +993,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function getPenaltyPayment() private view returns (uint) {
         // The base penalty is 0.1 of the native coin, but if the lottery is inactive and there are at least two players, then the penalty is multiplied by 5.
-        uint penalty = 0.1 ether;
+        uint _penalty = 0.1 ether;
         if(!isLotteryActive() && !isZeroPlayerGame() && !isOnePlayerGame()) {
-            penalty *= 5;
+            _penalty *= 5;
         }
-        return penalty;
+        return _penalty;
     }
 
     function getPlayerPrizePool() private view returns (uint) {
@@ -1009,9 +1009,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function getRemainingCorruptContractGracePeriodBlocks() private view returns (uint) {
-        uint numBlocksPassed = block.number - corruptContractBlockNumber;
-        if(numBlocksPassed <= CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS) {
-            return CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS - numBlocksPassed;
+        uint _numBlocksPassed = block.number - corruptContractBlockNumber;
+        if(_numBlocksPassed <= CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS) {
+            return CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS - _numBlocksPassed;
         }
         else {
             return 0;
@@ -1019,10 +1019,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function getRemainingLotteryActiveBlocks() private view returns (uint) {
-        uint numBlocksPassed = block.number - lotteryBlockNumberStart;
+        uint _numBlocksPassed = block.number - lotteryBlockNumberStart;
 
-        if(numBlocksPassed <= lotteryActiveBlocks) {
-            return lotteryActiveBlocks - numBlocksPassed;
+        if(_numBlocksPassed <= lotteryActiveBlocks) {
+            return lotteryActiveBlocks - _numBlocksPassed;
         }
         else {
             return 0;
@@ -1033,13 +1033,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return ticketPrice;
     }
 
-    function getTokenBalance(address tokenAddress) private view returns (uint) {
-        return IERC20(tokenAddress).balanceOf(address(this));
+    function getTokenBalance(address _tokenAddress) private view returns (uint) {
+        return IERC20(_tokenAddress).balanceOf(address(this));
     }
 
-    function getTokenMinimumReserve(address tokenAddress) private view returns (uint) {
+    function getTokenMinimumReserve(address _tokenAddress) private view returns (uint) {
         // Chainlink is the only token with a minimum reserve requirement, and if the contract is ready to be destroyed then the reserve no longer applies.
-        if(tokenAddress == CHAINLINK_TOKEN_ADDRESS && !isSelfDestructReady()) {
+        if(_tokenAddress == CHAINLINK_TOKEN_ADDRESS && !isSelfDestructReady()) {
             return CHAINLINK_MINIMUM_RESERVE;
         }
         else {
@@ -1153,23 +1153,23 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         selfdestruct(payable(_address));
     }
 
-    function tokenTransferToAddress(address tokenAddress, address _address, uint value) private {
+    function tokenTransferToAddress(address _tokenAddress, address _address, uint _value) private {
         // Take extra care to account for tokens that don't revert on failure or that don't return a value.
         // A return value is optional, but if it is present then it must be true.
-        if(tokenAddress.code.length == 0) {
-            revert TokenContractError(tokenAddress);
+        if(_tokenAddress.code.length == 0) {
+            revert TokenContractError(_tokenAddress);
         }
 
-        bytes memory callData = abi.encodeWithSelector(IERC20(tokenAddress).transfer.selector, _address, value);
-        (bool success, bytes memory returnData) = tokenAddress.call(callData);
+        bytes memory callData = abi.encodeWithSelector(IERC20(_tokenAddress).transfer.selector, _address, _value);
+        (bool success, bytes memory returnData) = _tokenAddress.call(callData);
 
         if(!success || (returnData.length != 0 && !abi.decode(returnData, (bool)))) {
-            revert TokenTransferError(tokenAddress, _address, value);
+            revert TokenTransferError(_tokenAddress, _address, _value);
         }
     }
 
-    function transferToAddress(address _address, uint value) private {
-        payable(_address).transfer(value);
+    function transferToAddress(address _address, uint _value) private {
+        payable(_address).transfer(_value);
     }
 
     /*
@@ -1185,11 +1185,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
 
         // Check to see if the block time has drifted too high.
-        uint deltaBlockNumber = block.number - referenceBlockNumber;
-        if(deltaBlockNumber != 0) {
-            uint deltaTimestamp = block.timestamp - referenceTimestamp;
-            uint blockTime = deltaTimestamp / deltaBlockNumber;
-            if(blockTime > 20 * CHAIN_BLOCK_TIME) {
+        uint _deltaBlockNumber = block.number - referenceBlockNumber;
+        if(_deltaBlockNumber != 0) {
+            uint _deltaTimestamp = block.timestamp - referenceTimestamp;
+            uint _blockTime = _deltaTimestamp / _deltaBlockNumber;
+            if(_blockTime > 20 * CHAIN_BLOCK_TIME) {
                 setCorruptContract(true);
                 emit ValidationFailed(2);
                 return;
@@ -1419,40 +1419,40 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice The operator can withdraw all of one kind of token, subject to a possible minimum reserve requirement.
-    /// @param tokenAddress The address where the token's contract lives.
-    function withdraw_allTokenBalance(address tokenAddress) external {
+    /// @param _tokenAddress The address where the token's contract lives.
+    function withdraw_allTokenBalance(address _tokenAddress) external {
         lock();
 
         requireOperatorAddress(msg.sender);
-        requireTokenWithdrawAllowed(tokenAddress, getTokenBalance(tokenAddress));
+        requireTokenWithdrawAllowed(_tokenAddress, getTokenBalance(_tokenAddress));
 
-        withdrawAllTokenBalance(tokenAddress, msg.sender);
+        withdrawAllTokenBalance(_tokenAddress, msg.sender);
 
         unlock();
     }
 
     /// @notice The operator can call this to withdraw any amount of Chainlink, subject to a possible minimum reserve requirement.
-    /// @param value The amount of Chainlink to withdraw.
-    function withdraw_chainlinkBalance(uint value) external {
+    /// @param _value The amount of Chainlink to withdraw.
+    function withdraw_chainlinkBalance(uint _value) external {
         lock();
 
         requireOperatorAddress(msg.sender);
-        requireTokenWithdrawAllowed(CHAINLINK_TOKEN_ADDRESS, value);
+        requireTokenWithdrawAllowed(CHAINLINK_TOKEN_ADDRESS, _value);
 
-        withdrawChainlinkBalance(msg.sender, value);
+        withdrawChainlinkBalance(msg.sender, _value);
 
         unlock();
     }
 
     /// @notice The operator can call this to withdraw any amount of the contract funds.
-    /// @param value The amount of contract funds to withdraw.
-    function withdraw_contractFunds(uint value) external {
+    /// @param _value The amount of contract funds to withdraw.
+    function withdraw_contractFunds(uint _value) external {
         lock();
 
         requireOperatorAddress(msg.sender);
-        requireWithdrawAllowed(value);
+        requireWithdrawAllowed(_value);
 
-        withdrawContractFunds(msg.sender, value);
+        withdrawContractFunds(msg.sender, _value);
 
         unlock();
     }
@@ -1484,15 +1484,15 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice The operator can withdraw any amount of one kind of token, subject to a possible minimum reserve requirement.
-    /// @param tokenAddress The address where the token's contract lives.
-    /// @param value The amount of tokens to withdraw.
-    function withdraw_tokenBalance(address tokenAddress, uint value) external {
+    /// @param _tokenAddress The address where the token's contract lives.
+    /// @param _value The amount of tokens to withdraw.
+    function withdraw_tokenBalance(address _tokenAddress, uint _value) external {
         lock();
 
         requireOperatorAddress(msg.sender);
-        requireTokenWithdrawAllowed(tokenAddress, value);
+        requireTokenWithdrawAllowed(_tokenAddress, _value);
 
-        withdrawTokenBalance(tokenAddress, msg.sender, value);
+        withdrawTokenBalance(_tokenAddress, msg.sender, _value);
 
         unlock();
     }
@@ -1586,11 +1586,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice Returns whether a withdraw of the specified amount of the token would be allowed.
-    /// @param tokenAddress The address where the token's contract lives.
-    /// @param value The amount of tokens to withdraw.
+    /// @param _tokenAddress The address where the token's contract lives.
+    /// @param _value The amount of tokens to withdraw.
     /// @return Whether a withdraw of the specified amount of the token would be allowed.
-    function query_isTokenWithdrawAllowed(address tokenAddress, uint value) external view returns (bool) {
-        return isTokenWithdrawAllowed(tokenAddress, value);
+    function query_isTokenWithdrawAllowed(address _tokenAddress, uint _value) external view returns (bool) {
+        return isTokenWithdrawAllowed(_tokenAddress, _value);
     }
 
     /// @notice Returns whether a winning ticket has been drawn for the current lottery.
@@ -1646,17 +1646,17 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice Returns the predicted number of times that the address will win the current lottery out of N times, truncated to an integer. This function can be used to get extra digits in the answer that would normally get truncated.
     /// @param _address The address that we are checking.
-    /// @param N The total number of times that we want to know how many times the address will win out of.
+    /// @param _N The total number of times that we want to know how many times the address will win out of.
     /// @return The predicted number of times that the address will win the current lottery out of N times.
-    function get_addressWinTimesOutOf(address _address, uint N) external view returns (uint) {
-        return getAddressWinTimesOutOf(_address, N);
+    function get_addressWinTimesOutOf(address _address, uint _N) external view returns (uint) {
+        return getAddressWinTimesOutOf(_address, _N);
     }
 
     /// @notice Returns the amount of a token that can be withdrawn.
-    /// @param tokenAddress The address where the token's contract lives.
+    /// @param _tokenAddress The address where the token's contract lives.
     /// @return The amount of a token that can be withdrawn.
-    function get_allowedTokenWithdrawBalance(address tokenAddress) external view returns (uint) {
-        return getAllowedTokenWithdrawBalance(tokenAddress);
+    function get_allowedTokenWithdrawBalance(address _tokenAddress) external view returns (uint) {
+        return getAllowedTokenWithdrawBalance(_tokenAddress);
     }
 
     /// @notice Returns the bonus prize pool. This is the amount of bonus funds that anyone can donate to "sweeten the pot".
@@ -1788,17 +1788,17 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     /// @notice Returns the balance of a token.
-    /// @param tokenAddress The address where the token's contract lives.
+    /// @param _tokenAddress The address where the token's contract lives.
     /// @return The balance of a token.
-    function get_tokenBalance(address tokenAddress) external view returns (uint) {
-        return getTokenBalance(tokenAddress);
+    function get_tokenBalance(address _tokenAddress) external view returns (uint) {
+        return getTokenBalance(_tokenAddress);
     }
 
     /// @notice Returns the minimum reserve requirement of a token.
-    /// @param tokenAddress The address where the token's contract lives.
+    /// @param _tokenAddress The address where the token's contract lives.
     /// @return The minimum reserve requirement of a token.
-    function get_tokenMinimumReserve(address tokenAddress) external view returns (uint) {
-        return getTokenMinimumReserve(tokenAddress);
+    function get_tokenMinimumReserve(address _tokenAddress) external view returns (uint) {
+        return getTokenMinimumReserve(_tokenAddress);
     }
 
     /// @notice Returns the total number of tickets in the current lottery.
