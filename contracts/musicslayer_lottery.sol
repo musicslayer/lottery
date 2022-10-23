@@ -81,7 +81,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     error ChainlinkVRFRequestIdMismatch(uint callbackRequestId, uint expectedRequestId);
 
     /// @notice The Chainlink VRF request was initiated during a previous lottery.
-    error ChainlinkVRFRequestStale(uint requestLotteryNumber, uint currentLotteryNumber);
+    error ChainlinkVRFRequestStale(uint currentLotteryNumber, uint requestLotteryNumber);
 
     /// @notice This contract is corrupt.
     error CorruptContractError();
@@ -98,7 +98,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice The lottery is not canceled.
     error LotteryNotCanceledError(uint lotteryNumber);
 
-    /// @notice The ticket price cannot exceed the maximum price.
+    /// @notice The number of active blocks for a lottery cannot exceed the maximum allowed value.
+    error MaxLotteryActiveBlocksError(uint requestedLotteryActiveBlocks, uint maxLotteryActiveBlocks);
+
+    /// @notice The ticket price cannot exceed the maximum allowed value.
     error MaxTicketPriceError(uint requestedTicketPrice, uint maxTicketPrice);
 
     /// @notice This transaction is attempting to purchase too many tickets.
@@ -145,6 +148,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice The withdraw is not allowed.
     error WithdrawError(uint requestedValue, uint operatorContractBalance);
+
+    /// @notice A lottery cannot have zero active blocks.
+    error ZeroLotteryActiveBlocksError();
 
     /// @notice A ticket price of zero is not allowed.
     error ZeroTicketPriceError();
@@ -205,6 +211,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     // The grace period after the contract becomes corrupt that everyone has to withdraw their funds before the owner can destroy it.
     uint private constant CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS = 864_000; // About 30 days.
+
+    // This is the maximum amount of blocks a lottery can be active for.
+    uint private constant MAX_LOTTERY_ACTIVE_BLOCKS = 10_512_000; // About 365 days.
 
     // This is the maximum ticket price that can be set.
     uint private constant MAX_TICKET_PRICE = 10_000 ether;
@@ -503,7 +512,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
 
         if(map_chainlinkRequestId2LotteryNum[requestId] != lotteryNumber) {
-            revert ChainlinkVRFRequestStale(map_chainlinkRequestId2LotteryNum[requestId], lotteryNumber);
+            revert ChainlinkVRFRequestStale(lotteryNumber, map_chainlinkRequestId2LotteryNum[requestId]);
         }
 
         // This function will not be called if the total number of tickets is zero.
@@ -1044,6 +1053,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function setLotteryActiveBlocks(uint _nextLotteryActiveBlocks) private {
         // Do not set the current active lottery blocks here. When the next lottery starts, the current active lottery blocks will be updated.
+        if(_nextLotteryActiveBlocks == 0) {
+            revert ZeroLotteryActiveBlocksError();
+        }
+
+        if(_nextLotteryActiveBlocks > MAX_LOTTERY_ACTIVE_BLOCKS) {
+            revert MaxLotteryActiveBlocksError(_nextLotteryActiveBlocks, MAX_LOTTERY_ACTIVE_BLOCKS);
+        }
+
         nextLotteryActiveBlocks = _nextLotteryActiveBlocks;
     }
 
