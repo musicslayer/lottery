@@ -213,10 +213,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     // The grace period after the contract becomes corrupt that everyone has to withdraw their funds before the owner can destroy it.
-    uint private constant CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS = 864_000; // About 30 days.
+    uint private constant CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS = 30 days / CHAIN_BLOCK_TIME;
 
     // This is the maximum amount of blocks a lottery can be active for.
-    uint private constant MAX_LOTTERY_ACTIVE_BLOCKS = 10_512_000; // About 365 days.
+    uint private constant MAX_LOTTERY_ACTIVE_BLOCKS = 365 days / CHAIN_BLOCK_TIME;
 
     // This is the maximum ticket price that can be set.
     uint private constant MAX_TICKET_PRICE = 10_000 ether;
@@ -236,10 +236,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     address private constant CHAINLINK_TOKEN_ADDRESS = 0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06;
     address private constant CHAINLINK_WRAPPER_ADDRESS = 0x699d428ee890d55D56d5FC6e26290f3247A762bd;
 
-    uint32 private constant CHAINLINK_CALLBACK_GAS_LIMIT = 200_000; // This was chosen experimentally.
+    uint32 private constant CHAINLINK_CALLBACK_GAS_LIMIT = 200_000 wei; // This was chosen experimentally.
     uint private constant CHAINLINK_MINIMUM_RESERVE = 40 * 10 ** CHAINLINK_TOKEN_DECIMALS; // 40 LINK
-    uint16 private constant CHAINLINK_REQUEST_CONFIRMATION_BLOCKS = 200; // About 10 minutes. Use the maximum allowed value of 200 blocks to be extra secure.
-    uint16 private constant CHAINLINK_REQUEST_RETRY_BLOCKS = 600; // About 30 minutes.
+    uint16 private constant CHAINLINK_REQUEST_CONFIRMATION_BLOCKS = 200; // Use the maximum allowed value of 200 blocks to be extra secure.
+    uint16 private constant CHAINLINK_REQUEST_RETRY_BLOCKS = 600;
     uint private constant CHAINLINK_RETRY_MAX = 10;
     uint private constant CHAINLINK_TOKEN_DECIMALS = 18;
     
