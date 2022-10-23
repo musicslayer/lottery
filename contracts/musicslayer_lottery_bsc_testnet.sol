@@ -216,7 +216,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     uint private constant CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS = 30 days / CHAIN_BLOCK_TIME;
 
     // This is the maximum amount of blocks a lottery can be active for.
-    uint private constant MAX_LOTTERY_ACTIVE_BLOCKS = 365 days / CHAIN_BLOCK_TIME;
+    uint private constant MAX_LOTTERY_ACTIVE_BLOCKS = 90 days / CHAIN_BLOCK_TIME;
 
     // This is the maximum ticket price that can be set.
     uint private constant MAX_TICKET_PRICE = 10_000 ether;
@@ -1221,6 +1221,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         if(getTotalTickets() != 0 && map_ticket2Address[0] == address(0)) {
             setCorruptContract(true);
             emit ValidationFailed(6);
+            return;
+        }
+
+        // Check to see if the lottery has not ended in a long time.
+        if(block.number - lotteryBlockNumberStart > 2 * MAX_LOTTERY_ACTIVE_BLOCKS) {
+            setCorruptContract(true);
+            emit ValidationFailed(7);
             return;
         }
     }
