@@ -1840,6 +1840,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     /// @notice The owner can call this to get information about the internal state of the contract.
+    function diagnostic_chainVariables() external view returns (uint _referenceBlockNumber, uint _referenceTimestamp) {
+        requireOwnerAddress(msg.sender);
+
+        return(referenceBlockNumber, referenceTimestamp);
+    }
+
+    /// @notice The owner can call this to get information about the internal state of the contract.
     function diagnostic_contractVariables() external view returns (address _operatorAddress, address _operatorSuccessorAddress, address _ownerAddress, address _ownerSuccessorAddress, bool _corruptContractFlag, bool _lockFlag, uint _corruptContractBlockNumber) {
         requireOwnerAddress(msg.sender);
 
