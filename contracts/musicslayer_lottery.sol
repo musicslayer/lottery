@@ -65,7 +65,7 @@ abstract contract VRFV2WrapperConsumerBase {
 }
 
 /**
- * @title The Musicslayer Lottery
+ * @title The Musicslayer Lottery (BSC Testnet)
  * @author Musicslayer
  */
 contract MusicslayerLottery is VRFV2WrapperConsumerBase {
@@ -199,11 +199,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     /*
-        Contract Constants
+        Chain Constants
     */
 
     // The identifier of the chain that this contract is meant to be deployed on.
-    uint private constant CHAIN_ID = 97; // BSC Testnet
+    uint private constant CHAIN_ID = 97; 
+
+    // The average block time of the chain.
+    uint private constant CHAIN_BLOCK_TIME = 3 seconds;
 
     /*
         Lottery Constants
@@ -247,6 +250,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     *
     *
     */
+
+    /*
+        Chain Variables
+    */
+
+    uint private referenceBlockNumber;
+    uint private referenceTimestamp;
 
     /*
         Contract Variables
@@ -331,6 +341,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     constructor(uint initialLotteryActiveBlocks, uint initialTicketPrice) VRFV2WrapperConsumerBase(CHAINLINK_TOKEN_ADDRESS, CHAINLINK_WRAPPER_ADDRESS) payable {
         assert(block.chainid == CHAIN_ID);
+
+        updateReferenceBlock();
 
         addContractFunds(msg.value);
 
@@ -486,6 +498,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function offerOwnerRole(address _address) private {
         setOwnerSuccessorAddress(_address);
+    }
+
+    function updateReferenceBlock() private {
+        referenceBlockNumber = block.number;
+        referenceTimestamp = block.timestamp;
     }
 
     /*
@@ -1154,33 +1171,50 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     function validate() private {
+        // Check for a hard fork.
         if(block.chainid != CHAIN_ID) {
             setCorruptContract(true);
             emit ValidationFailed(1);
             return;
         }
 
-        if(lockFlag) {
-            setCorruptContract(true);
-            emit ValidationFailed(2);
-            return;
+        // Check to see if the block time has drifted too high.
+        uint deltaBlockNumber = block.number - referenceBlockNumber;
+        if(deltaBlockNumber != 0) {
+            uint deltaTimestamp = block.timestamp - referenceTimestamp;
+            uint blockTime = deltaTimestamp / deltaBlockNumber;
+            if(blockTime > 20 * CHAIN_BLOCK_TIME) {
+                setCorruptContract(true);
+                emit ValidationFailed(2);
+                return;
+            }
         }
 
-        if(getAccountedContractBalance() > getContractBalance()) {
+        // Check for a locked contract.
+        if(lockFlag) {
             setCorruptContract(true);
             emit ValidationFailed(3);
             return;
         }
 
-        if(getTotalTickets() * ticketPrice != playerPrizePool) {
+        // Check for the incorrect accounting of the contract balance.
+        if(getAccountedContractBalance() > getContractBalance()) {
             setCorruptContract(true);
             emit ValidationFailed(4);
             return;
         }
 
-        if(currentTicketNumber != 0 && map_ticket2Address[0] == address(0)) {
+        // Check for a player prize pool that doesn't match the money used to buy tickets.
+        if(getTotalTickets() * ticketPrice != playerPrizePool) {
             setCorruptContract(true);
             emit ValidationFailed(5);
+            return;
+        }
+
+        // Check for an incorrect counting of tickets.
+        if(currentTicketNumber != 0 && map_ticket2Address[0] == address(0)) {
+            setCorruptContract(true);
+            emit ValidationFailed(6);
             return;
         }
     }
@@ -1299,6 +1333,17 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requireOwnerAddress(msg.sender);
 
         offerOwnerRole(_address);
+
+        unlock();
+    }
+
+    /// @notice The owner can update the reference block number and timestamp.
+    function action_updateReferenceBlock() external {
+        lock();
+
+        requireOwnerAddress(msg.sender);
+
+        updateReferenceBlock();
 
         unlock();
     }
