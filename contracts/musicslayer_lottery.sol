@@ -386,17 +386,21 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function buyTickets(address _address, uint value) private {
         // Purchase as many tickets as possible for the address with the provided value. Note that tickets can only be purchased in whole number quantities.
         // After spending all the funds on tickets, anything left over will be added to the address's claimable balance.
-        uint numTickets = value / ticketPrice;
+        uint _currentTicketNumber = currentTicketNumber;
+        uint _lotteryNumber = lotteryNumber;
+        uint _ticketPrice = ticketPrice;
+
+        uint numTickets = value / _ticketPrice;
         if(numTickets > MAX_TICKET_PURCHASE) {
             revert MaxTicketPurchaseError(numTickets, MAX_TICKET_PURCHASE);
         }
 
-        addAddressTickets(lotteryNumber, _address, numTickets, ticketPrice);
-        addAddressClaimableBalance(_address, value - (numTickets * ticketPrice));
+        addAddressTickets(_lotteryNumber, _address, numTickets, _ticketPrice);
+        addAddressClaimableBalance(_address, value - (numTickets * _ticketPrice));
         
         // To save gas, only write the information for the first purchased ticket, and then every 100 afterwards.
-        uint endTicketNumber = currentTicketNumber + numTickets;
-        for(uint i = currentTicketNumber; i < endTicketNumber; i += 100) {
+        uint endTicketNumber = _currentTicketNumber + numTickets;
+        for(uint i = _currentTicketNumber; i < endTicketNumber; i += 100) {
             map_ticket2Address[i] = _address;
         }
 
@@ -406,7 +410,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function cancelCurrentLottery(uint value) private {
         // Mark the current lottery as canceled and start a new lottery.
         // For recordkeeping purposes, the winner is the zero address and their prize is zero.
-        map_lotteryNum2IsCanceled[lotteryNumber] = true;
+        uint _lotteryNumber = lotteryNumber;
+
+        map_lotteryNum2IsCanceled[_lotteryNumber] = true;
 
         // Move funds in the player prize pool to the refund pool. Players who have purchased tickets may request a refund manually.
         addRefundPool(playerPrizePool);
@@ -415,7 +421,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         // Carry over the existing bonus prize pool and add in the additional value.
         addBonusPrizePool(value);
 
-        emit LotteryCancel(lotteryNumber, lotteryBlockNumberStart);
+        emit LotteryCancel(_lotteryNumber, lotteryBlockNumberStart);
 
         startNewLottery();
     }
@@ -455,6 +461,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function endCurrentLottery() private {
         // End the current lottery, credit any prizes rewarded, and then start a new lottery.
+        uint _lotteryNumber = lotteryNumber;
+        uint _bonusPrizePool = bonusPrizePool;
+        uint _playerPrizePool = playerPrizePool;
+
         address winnerAddress;
         uint winnerPrize;
 
@@ -467,20 +477,20 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         else {
             winnerAddress = findWinnerAddress(winningTicket);
 
-            uint operatorPrize = playerPrizePool * OPERATOR_CUT / 100;
-            winnerPrize = playerPrizePool + bonusPrizePool - operatorPrize;
+            uint operatorPrize = _playerPrizePool * OPERATOR_CUT / 100;
+            winnerPrize = _playerPrizePool + _bonusPrizePool - operatorPrize;
 
             addAddressClaimableBalance(getOperatorAddress(), operatorPrize);
             addAddressClaimableBalance(winnerAddress, winnerPrize);
 
-            subtractPlayerPrizePool(playerPrizePool);
-            subtractBonusPrizePool(bonusPrizePool);
+            subtractPlayerPrizePool(_playerPrizePool);
+            subtractBonusPrizePool(_bonusPrizePool);
         }
 
-        map_lotteryNum2WinnerAddress[lotteryNumber] = winnerAddress;
-        map_lotteryNum2WinnerPrize[lotteryNumber] = winnerPrize;
+        map_lotteryNum2WinnerAddress[_lotteryNumber] = winnerAddress;
+        map_lotteryNum2WinnerPrize[_lotteryNumber] = winnerPrize;
 
-        emit LotteryEnd(lotteryNumber, lotteryBlockNumberStart, winnerAddress, winnerPrize);
+        emit LotteryEnd(_lotteryNumber, lotteryBlockNumberStart, winnerAddress, winnerPrize);
 
         startNewLottery();
     }
@@ -521,8 +531,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             revert ChainlinkVRFRequestIdMismatch(requestId, chainlinkRequestId);
         }
 
-        if(map_chainlinkRequestId2LotteryNum[requestId] != lotteryNumber) {
-            revert ChainlinkVRFRequestStale(lotteryNumber, map_chainlinkRequestId2LotteryNum[requestId]);
+        uint _lotteryNumber = lotteryNumber;
+
+        if(map_chainlinkRequestId2LotteryNum[requestId] != _lotteryNumber) {
+            revert ChainlinkVRFRequestStale(_lotteryNumber, map_chainlinkRequestId2LotteryNum[requestId]);
         }
 
         // This function will not be called if the total number of tickets is zero.
@@ -549,9 +561,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         chainlinkRequestIdFlag = false;
         chainlinkRetryCounter = 0;
 
-        map_lotteryNum2TicketPrice[lotteryNumber] = ticketPrice;
+        uint _lotteryNumber = lotteryNumber;
+        uint _ticketPrice = ticketPrice;
 
-        emit LotteryStart(lotteryNumber, lotteryBlockNumberStart, lotteryActiveBlocks, ticketPrice);
+        map_lotteryNum2TicketPrice[_lotteryNumber] = _ticketPrice;
+        emit LotteryStart(_lotteryNumber, lotteryBlockNumberStart, lotteryActiveBlocks, _ticketPrice);
     }
 
     function updateLotteryActiveBlocks() private {
@@ -668,7 +682,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         // Withdraw an amount from the contract funds. For the purposes of this function, extra funds are treated as contract funds.
         uint extraContractBalance = getExtraContractBalance();
         if(value > extraContractBalance) {
-            // Only if the value is higher than the extra funds do we subtract from "contractFunds". This accounting makes it so extra funds are withdrawn first.
+            // Only subtract from "contractFunds" the excess value not covered by extra funds. This accounting makes it so extra funds are withdrawn first.
             subtractContractFunds(value - extraContractBalance);
         }
         transferToAddress(_address, value);
@@ -889,7 +903,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return map_lotteryNum2Address2NumTickets[lotteryNumber][_address];
     }
 
-    function getAddressWinChanceOutOf(address _address, uint N) private view returns (uint) {
+    function getAddressWinTimesOutOf(address _address, uint N) private view returns (uint) {
         uint totalTickets = getTotalTickets();
 
         if(totalTickets == 0) {
@@ -1623,19 +1637,19 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return getAddressTickets(_address);
     }
 
-    /// @notice Returns the predicted number of times that the address will win out of 100 times, truncated to an integer. This is equivalent to the percentage probability of the address winning.
+    /// @notice Returns the predicted number of times that the address will win the current lottery out of 100 times, truncated to an integer. This is equivalent to the percentage probability of the address winning.
     /// @param _address The address that we are checking.
-    /// @return The predicted number of times that the address will win out of 100 times.
-    function get_addressWinChanceOutOf100(address _address) external view returns (uint) {
-        return getAddressWinChanceOutOf(_address, 100);
+    /// @return The predicted number of times that the address will win the current lottery out of 100 times.
+    function get_addressWinTimesOutOf100(address _address) external view returns (uint) {
+        return getAddressWinTimesOutOf(_address, 100);
     }
 
-    /// @notice Returns the predicted number of times that the address will win out of N times, truncated to an integer. This function can be used to get extra digits in the answer that would normally get truncated.
+    /// @notice Returns the predicted number of times that the address will win the current lottery out of N times, truncated to an integer. This function can be used to get extra digits in the answer that would normally get truncated.
     /// @param _address The address that we are checking.
     /// @param N The total number of times that we want to know how many times the address will win out of.
-    /// @return The predicted number of times that the address will win out of N times.
-    function get_addressWinChanceOutOf(address _address, uint N) external view returns (uint) {
-        return getAddressWinChanceOutOf(_address, N);
+    /// @return The predicted number of times that the address will win the current lottery out of N times.
+    function get_addressWinTimesOutOf(address _address, uint N) external view returns (uint) {
+        return getAddressWinTimesOutOf(_address, N);
     }
 
     /// @notice Returns the amount of a token that can be withdrawn.
@@ -1798,25 +1812,25 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     /// @notice The operator can call this to change the total number of active blocks for the lottery. This change will go into effect starting from the next lottery.
-    /// @param newLotteryActiveBlocks The new total number of active blocks for the lottery.
-    function set_lotteryActiveBlocks(uint newLotteryActiveBlocks) external {
+    /// @param _nextLotteryActiveBlocks The new total number of active blocks for the lottery.
+    function set_lotteryActiveBlocks(uint _nextLotteryActiveBlocks) external {
         lock();
 
         requireOperatorAddress(msg.sender);
 
-        setLotteryActiveBlocks(newLotteryActiveBlocks);
+        setLotteryActiveBlocks(_nextLotteryActiveBlocks);
 
         unlock();
     }
 
     /// @notice The operator can call this to change the ticket price of the lottery. This change will go into effect starting from the next lottery.
-    /// @param newTicketPrice The new ticket price of the lottery.
-    function set_ticketPrice(uint newTicketPrice) external {
+    /// @param _nextTicketPrice The new ticket price of the lottery.
+    function set_ticketPrice(uint _nextTicketPrice) external {
         lock();
 
         requireOperatorAddress(msg.sender);
 
-        setTicketPrice(newTicketPrice);
+        setTicketPrice(_nextTicketPrice);
 
         unlock();
     }
