@@ -185,7 +185,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     event OwnerChanged(address indexed oldOwnerAddress, address indexed newOwnerAddress);
 
     /// @notice A record of the contract failing a validation check.
-    event ValidationFailed(uint checkNumber);
+    event ValidationFailed(uint indexed checkNumber);
 
     /// @notice A record of a winning ticket being drawn.
     event WinningTicketDrawn(uint indexed winningTicket, uint indexed totalTickets);
@@ -283,7 +283,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
           contractFunds - The general funds owned by the contract.
           playerPrizePool - The funds players have paid to purchase tickets.
           refundPool - The funds that were in the playerPrizePool for a lottery that was canceled.
-        Anything else not accounted for is considered to be extra funds. Note that tokens are not included in this accounting.
+        Anything else not accounted for is considered to be extra funds (tokens are not included in this accounting).
         The operator can only withdraw from the contract funds and the extra funds.
     */
     uint private bonusPrizePool;
@@ -404,8 +404,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function cancelCurrentLottery(uint value) private {
-        // Mark the current lottery as refundable and start a new lottery.
-        // For recordkeeping purposes, the winner is the zero address and the prize is zero.
+        // Mark the current lottery as canceled and start a new lottery.
+        // For recordkeeping purposes, the winner is the zero address and their prize is zero.
         map_lotteryNum2IsCanceled[lotteryNumber] = true;
 
         // Move funds in the player prize pool to the refund pool. Players who have purchased tickets may request a refund manually.
@@ -433,17 +433,17 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             revert DrawWinningTicketError();
         }
 
-        // At a certain point we must conclude that Chainlink is down and give up. Don't allow for additional attempts because they cost Chainlink tokens.
-        if(chainlinkRetryCounter > CHAINLINK_RETRY_MAX) {
-            setCorruptContract(true);
-            return;
-        }
-
         if(isZeroPlayerGame() || isOnePlayerGame()) {
             // Don't bother paying Chainlink for a random number.
             recordWinningTicket(0);
         }
         else {
+            if(chainlinkRetryCounter > CHAINLINK_RETRY_MAX) {
+                // At a certain point we must conclude that Chainlink is down and give up. Don't allow for additional attempts because they cost Chainlink tokens.
+                setCorruptContract(true);
+                return;
+            }
+
             chainlinkRetryCounter++;
             chainlinkRequestIdFlag = true;
             chainlinkRequestIdBlockNumber = block.number;
@@ -456,33 +456,26 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function endCurrentLottery() private {
         // End the current lottery, credit any prizes rewarded, and then start a new lottery.
         address winnerAddress;
-        uint operatorPrize;
         uint winnerPrize;
 
         if(isZeroPlayerGame()) {
-            // No one played. For recordkeeping purposes, the winner is the zero address and the prize is zero.
+            // No one played. For recordkeeping purposes, the winner is the zero address and their prize is zero.
+            // Any balance in the bonus prize pool will be carried over.
             winnerAddress = address(0);
-            operatorPrize = 0;
             winnerPrize = 0;
         }
-        else if(isOnePlayerGame()) {
-            // Since only one person has played, just give them the entire prize.
-            winnerAddress = map_ticket2Address[0];
-            operatorPrize = 0;
-            winnerPrize = bonusPrizePool + playerPrizePool;
-        }
         else {
-            // Give the lottery operator their cut of the pot, and then give the rest to the randomly chosen winner.
             winnerAddress = findWinnerAddress(winningTicket);
-            operatorPrize = playerPrizePool * OPERATOR_CUT / 100;
+
+            uint operatorPrize = playerPrizePool * OPERATOR_CUT / 100;
             winnerPrize = playerPrizePool + bonusPrizePool - operatorPrize;
+
+            addAddressClaimableBalance(getOperatorAddress(), operatorPrize);
+            addAddressClaimableBalance(winnerAddress, winnerPrize);
+
+            subtractPlayerPrizePool(playerPrizePool);
+            subtractBonusPrizePool(bonusPrizePool);
         }
-
-        addAddressClaimableBalance(getOperatorAddress(), operatorPrize);
-        addAddressClaimableBalance(winnerAddress, winnerPrize);
-
-        subtractPlayerPrizePool(playerPrizePool);
-        subtractBonusPrizePool(bonusPrizePool);
 
         map_lotteryNum2WinnerAddress[lotteryNumber] = winnerAddress;
         map_lotteryNum2WinnerPrize[lotteryNumber] = winnerPrize;
@@ -513,7 +506,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         address winnerAddress = map_ticket2Address[ticket];
 
         // Because "map_ticket2Address" potentially has gaps, we may have to search until we find the winner address.
-        // Note that because of the way "map_ticket2Address" is filled in, element 0 is guaranteed to have a nonzero address.
+        // Note that because of the way "map_ticket2Address" is filled in, element 0 is guaranteed to have a nonzero address if the lottery has at least one player.
         while(winnerAddress == address(0)) {
             winnerAddress = map_ticket2Address[--ticket];
         }
@@ -544,18 +537,17 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function startNewLottery() private {
         // Reset lottery state and begin a new lottery. The contract is designed so that we don't need to clear any of the mappings, something that saves a lot of gas.
-        currentTicketNumber = 0;
-
-        // If any of these values have been changed by the operator, update them now before starting the next lottery.
+        updateReferenceBlock();
         updateLotteryActiveBlocks();
         updateTicketPrice();
 
-        lotteryNumber++;
+        currentTicketNumber = 0;
         lotteryBlockNumberStart = block.number;
+        lotteryNumber++;
         winningTicketFlag = false;
 
-        chainlinkRetryCounter = 0;
         chainlinkRequestIdFlag = false;
+        chainlinkRetryCounter = 0;
 
         map_lotteryNum2TicketPrice[lotteryNumber] = ticketPrice;
 
@@ -716,7 +708,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function isOnePlayerGame() private view returns (bool) {
         // Check to see if there is only one player who has purchased all the tickets.
-        return currentTicketNumber != 0 && (getAddressTickets(map_ticket2Address[0]) == getTotalTickets());
+        return getTotalTickets() != 0 && (getAddressTickets(map_ticket2Address[0]) == getTotalTickets());
     }
 
     function isOperatorAddress(address _address) private view returns (bool) {
@@ -774,7 +766,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function isZeroPlayerGame() private view returns (bool) {
         // If no tickets were purchased, then there cannot be any players.
-        return currentTicketNumber == 0;
+        return getTotalTickets() == 0;
     }
 
     /*
@@ -1212,7 +1204,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
 
         // Check for an incorrect counting of tickets.
-        if(currentTicketNumber != 0 && map_ticket2Address[0] == address(0)) {
+        if(getTotalTickets() != 0 && map_ticket2Address[0] == address(0)) {
             setCorruptContract(true);
             emit ValidationFailed(6);
             return;
@@ -1333,17 +1325,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requireOwnerAddress(msg.sender);
 
         offerOwnerRole(_address);
-
-        unlock();
-    }
-
-    /// @notice The owner can update the reference block number and timestamp.
-    function action_updateReferenceBlock() external {
-        lock();
-
-        requireOwnerAddress(msg.sender);
-
-        updateReferenceBlock();
 
         unlock();
     }
@@ -1904,6 +1885,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requireOwnerAddress(msg.sender);
 
         setLocked(false);
+    }
+
+    /// @notice The owner can manually update the reference block number and timestamp.
+    function failsafe_updateReferenceBlock() external {
+        requireOwnerAddress(msg.sender);
+
+        updateReferenceBlock();
     }
 
     /// @notice The owner can call this to validate the contract. If the contract's state is inconsistent, it will be marked as corrupt.
