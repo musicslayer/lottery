@@ -435,7 +435,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function drawWinningTicket() private {
-        if(winningTicketFlag || (chainlinkRequestIdFlag && !isRetryPermitted())) {
+        if(!isDrawPermitted()) {
             revert DrawWinningTicketError();
         }
 
@@ -503,11 +503,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         setOwnerSuccessorAddress(_address);
     }
 
-    function updateReferenceBlock() private {
-        referenceBlockNumber = block.number;
-        referenceTimestamp = block.timestamp;
-    }
-
     /*
         Helper Functions
     */
@@ -570,6 +565,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function updateLotteryActiveBlocks() private {
         lotteryActiveBlocks = nextLotteryActiveBlocks;
+    }
+
+    function updateReferenceBlock() private {
+        referenceBlockNumber = block.number;
+        referenceTimestamp = block.timestamp;
     }
 
     function updateTicketPrice() private {
@@ -708,6 +708,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return getRemainingCorruptContractGracePeriodBlocks() != 0;
     }
 
+    function isDrawPermitted() private view returns (bool) {
+        // Once a winning ticket for a lottery has been drawn, no further draws for that lottery are allowed. 
+        // If the winning ticket has not been drawn yet, we allow for a retry if Chainlink hasn't given us the random number after a certain number of blocks after the request.
+        // This would be needed if Chainlink ever experiences an outage.
+        return !winningTicketFlag && (!chainlinkRequestIdFlag || (block.number - chainlinkRequestIdBlockNumber > CHAINLINK_REQUEST_RETRY_BLOCKS));
+    }
+
     function isLocked() private view returns (bool) {
         return lockFlag;
     }
@@ -749,11 +756,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function isPlayerAddress(address _address) private view returns (bool) {
         // The only ineligible player is the operator.
         return _address != getOperatorAddress();
-    }
-
-    function isRetryPermitted() private view returns (bool) {
-        // We allow for a redraw if the random number has not been received after a certain number of blocks. This would be needed if Chainlink ever experiences an outage.
-        return block.number - chainlinkRequestIdBlockNumber > CHAINLINK_REQUEST_RETRY_BLOCKS;
     }
 
     function isSelfDestructReady() private view returns (bool) {
@@ -896,7 +898,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function getAddressRefund(uint _lotteryNumber, address _address) private view returns (uint) {
-        return map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] * map_lotteryNum2TicketPrice[_lotteryNumber];
+        // Only canceled lotteries offer refunds.
+        if(map_lotteryNum2IsCanceled[_lotteryNumber]) {
+            return map_lotteryNum2Address2NumTickets[_lotteryNumber][_address] * map_lotteryNum2TicketPrice[_lotteryNumber];
+        }
+        else {
+            return 0;
+        }
     }
 
     function getAddressTickets(address _address) private view returns (uint) {
@@ -975,12 +983,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return operatorAddress;
     }
 
-    function getOperatorSuccessorAddress() private view returns (address) {
-        return operatorSuccessorAddress;
-    }
-
     function getOperatorContractBalance() private view returns (uint) {
         return contractFunds + getExtraContractBalance();
+    }
+
+    function getOperatorSuccessorAddress() private view returns (address) {
+        return operatorSuccessorAddress;
     }
 
     function getOwnerAddress() private view returns (address) {
@@ -1009,6 +1017,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function getRemainingCorruptContractGracePeriodBlocks() private view returns (uint) {
+        // This number is only nonzero if the contract is corrupt.
+        if(!isCorruptContract()) {
+            return 0;
+        }
+
         uint _numBlocksPassed = block.number - corruptContractBlockNumber;
         if(_numBlocksPassed <= CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS) {
             return CORRUPT_CONTRACT_GRACE_PERIOD_BLOCKS - _numBlocksPassed;
@@ -1527,6 +1540,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return isCorruptContractGracePeriod();
     }
 
+    /// @notice Returns whether drawing a winning ticket is permitted.
+    /// @return Whether drawing a winning ticket is permitted.
+    function query_isDrawPermitted() external view returns (bool) {
+        return isDrawPermitted();
+    }
+
     /// @notice Returns whether the contract is currently locked.
     /// @return Whether the contract is currently locked.
     function query_isLocked() external view returns (bool) {
@@ -1537,6 +1556,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @return Whether the current lottery is active.
     function query_isLotteryActive() external view returns (bool) {
         return isLotteryActive();
+    }
+
+    /// @notice Returns whether a lottery is canceled.
+    /// @return Whether a lottery is canceled.
+    function query_isLotteryCanceled(uint _lotteryNumber) external view returns (bool) {
+        return isLotteryCanceled(_lotteryNumber);
     }
 
     /// @notice Returns whether the current lottery only has one player.
@@ -1573,17 +1598,18 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return isOwnerSuccessorAddress(_address);
     }
 
+    /// @notice Returns whether the amount matches the penalty the operator must pay to cancel the current lottery. Note that the required penalty amount may increase as the lottery goes on.
+    /// @param _value The amount that we are checking.
+    /// @return Whether the amount matches the penalty the operator must pay to cancel the current lottery.
+    function query_isPenaltyPayment(uint _value) external view returns (bool) {
+        return isPenaltyPayment(_value);
+    }
+
     /// @notice Returns whether the address is an eligible player address.
     /// @param _address The address that we are checking.
     /// @return Whether the address is an eligible player address.
     function query_isPlayerAddress(address _address) external view returns (bool) {
         return isPlayerAddress(_address);
-    }
-
-    /// @notice Returns whether a retry of drawing a winning ticket is permitted.
-    /// @return Whether a retry of drawing a winning ticket is permitted.
-    function query_isRetryPermitted() external view returns (bool) {
-        return isRetryPermitted();
     }
 
     /// @notice Returns whether the self-destruct is ready.
@@ -1604,6 +1630,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @return Whether a winning ticket has been drawn for the current lottery.
     function query_isWinningTicketDrawn() external view returns (bool) {
         return isWinningTicketDrawn();
+    }
+
+    /// @notice Returns whether a withdraw of the specified amount of contract funds would be allowed.
+    /// @param _value The amount of contract funds to withdraw.
+    /// @return Whether a withdraw of the specified amount of contract funds would be allowed.
+    function query_isWithdrawAllowed(uint _value) external view returns (bool) {
+        return isWithdrawAllowed(_value);
     }
 
     /// @notice Returns whether the current lottery has no players.
@@ -1629,7 +1662,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return getAddressClaimableBalance(_address);
     }
 
-    /// @notice Returns the refund the address is entitled to if a lottery is canceled.
+    /// @notice Returns the refund the address is entitled to for a canceled lottery.
     /// @param _lotteryNumber The number of a lottery.
     /// @param _address The address that we are checking.
     /// @return The refund the address is entitled to.
@@ -1758,7 +1791,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return getOwnerSuccessorAddress();
     }
 
-    /// @notice Returns the penalty the operator must pay to cancel the current lottery. Note that this amount may increase later.
+    /// @notice Returns the penalty the operator must pay to cancel the current lottery. Note that the required penalty amount may increase as the lottery goes on.
     /// @return The penalty the operator must pay to cancel the current lottery.
     function get_penaltyPayment() external view returns (uint) {
         return getPenaltyPayment();
