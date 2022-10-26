@@ -203,7 +203,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     // The identifier of the chain that this contract is meant to be deployed on.
-    uint private constant CHAIN_ID = 97; 
+    uint private constant CHAIN_ID = 0; 
 
     // The average block time of the chain.
     uint private constant CHAIN_BLOCK_TIME = 3 seconds;
@@ -340,7 +340,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     constructor(uint _initialLotteryActiveBlocks, uint _initialTicketPrice) VRFV2WrapperConsumerBase(CHAINLINK_TOKEN_ADDRESS, CHAINLINK_WRAPPER_ADDRESS) payable {
-        assert(block.chainid == CHAIN_ID);
+        //assert(block.chainid == CHAIN_ID);
 
         updateReferenceBlock();
 
@@ -1258,16 +1258,19 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     */
 
     /// @notice Players can call this to buy tickets for the current lottery, but only if it is still active and the contract is not corrupt.
-    function action_buyTickets() external payable {
-        lock();
+    function action_buyTickets() external {
+        //lock();
 
-        requireLotteryActive();
-        requireNotCorruptContract();
-        requirePlayerAddress(msg.sender);
+        //revert MaxTicketPriceError(25, 10000 ether);
+        revert("abx");
 
-        buyTickets(msg.sender, msg.value);
+        //requireLotteryActive();
+        //requireNotCorruptContract();
+        //requirePlayerAddress(msg.sender);
 
-        unlock();
+        //buyTickets(msg.sender, msg.value);
+
+        //unlock();
     }
 
     /// @notice The operator can call this before a winning ticket is drawn to cancel the current lottery and refund everyone. The operator gives up their cut and must pay a penalty fee to do this.

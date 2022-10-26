@@ -8,7 +8,7 @@ function handleError(err) {
 
 async function deployContract(startingBalance, args) {
     // Create factory that will deploy the contract.
-    const lotteryFactory = await ethers.getContractFactory("Lottery");
+    const lotteryFactory = await ethers.getContractFactory("MusicslayerLottery");
 
     // Deploy the contract to a random address.
     //const lotteryContract = await lotteryFactory.deploy("0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2", { value: ethers.utils.parseEther(startingBalance) });
@@ -185,7 +185,7 @@ async function async_playLottery() {
 async function async_playLottery() {
     // Deploy contract and then use address to access contract object.
     let lotteryAddress = await deployContract(ethers.utils.parseEther("0.00000000000001"), [5, ethers.utils.parseEther("0.01")]);
-    const lotteryContract = await ethers.getContractAt("Lottery", lotteryAddress);
+    const lotteryContract = await ethers.getContractAt("MusicslayerLottery", lotteryAddress);
 
     console.log('X');
     //const call_foo = await lotteryContract.removeContractFunds(50000000000);
