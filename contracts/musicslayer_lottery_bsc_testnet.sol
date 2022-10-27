@@ -706,9 +706,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function isDrawPermitted() private view returns (bool) {
-        // After the first draw, we allow for redraws if Chainlink hasn't given us the random number after a certain number of blocks after the request.
-        // This would be needed if Chainlink ever experiences an outage.
-        return !chainlinkRequestIdFlag || (block.number - chainlinkRequestIdBlockNumber > CHAINLINK_REQUEST_RETRY_BLOCKS);
+        return !chainlinkRequestIdFlag || getRemainingBlocksBeforeRedraw() == 0;
     }
 
     function isLocked() private view returns (bool) {
@@ -1051,6 +1049,19 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function getRefundPool() private view returns (uint) {
         return refundPool;
+    }
+
+    function getRemainingBlocksBeforeRedraw() private view returns (uint) {
+        // We allow for redraws if Chainlink hasn't given us the random number after a certain number of blocks after the request.
+        // This would be needed if Chainlink ever experiences an outage.
+        uint _numBlocksPassed = block.number - chainlinkRequestIdBlockNumber;
+
+        if(_numBlocksPassed <= CHAINLINK_REQUEST_RETRY_BLOCKS) {
+            return CHAINLINK_REQUEST_RETRY_BLOCKS - _numBlocksPassed;
+        }
+        else {
+            return 0;
+        }
     }
 
     function getRemainingCorruptContractGracePeriodBlocks() private view returns (uint) {
@@ -1859,6 +1870,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @return The refund pool.
     function get_refundPool() external view returns (uint) {
         return getRefundPool();
+    }
+
+    /// @notice Returns the number of blocks remaining before a redraw is allowed.
+    /// @return The number of blocks remaining before a redraw is allowed.
+    function get_remainingBlocksBeforeRedraw() external view returns (uint) {
+        return getRemainingBlocksBeforeRedraw();
     }
 
     /// @notice Returns the remaining grace period blocks.
