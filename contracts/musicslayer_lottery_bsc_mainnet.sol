@@ -1650,6 +1650,27 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return isTokenWithdrawAllowed(_tokenAddress, _value);
     }
 
+    /// @notice Returns whether the input number of lottery active blocks is valid.
+    /// @param _lotteryActiveBlocks The number of lottery active blocks that we are checking.
+    /// @return Whether the input number of lottery active blocks is valid.
+    function query_isValidLotteryActiveBlocks(uint _lotteryActiveBlocks) external pure returns (bool) {
+        return isValidLotteryActiveBlocks(_lotteryActiveBlocks);
+    }
+
+    /// @notice Returns whether the input ticket price is valid.
+    /// @param _ticketPrice The ticket price that we are checking.
+    /// @return Whether the input ticket price is valid.
+    function query_isValidTicketPrice(uint _ticketPrice) external pure returns (bool) {
+        return isValidTicketPrice(_ticketPrice);
+    }
+
+    /// @notice Returns whether the input value will purchase a valid number of tickets.
+    /// @param _value The value that we are checking.
+    /// @return Whether the input value will purchase a valid number of tickets.
+    function query_isValidTicketPurchase(uint _value) external view returns (bool) {
+        return isValidTicketPurchase(_value);
+    }
+
     /// @notice Returns whether a winning ticket has been drawn for the current lottery.
     /// @return Whether a winning ticket has been drawn for the current lottery.
     function query_isWinningTicketDrawn() external view returns (bool) {
@@ -1783,6 +1804,13 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @return The winner's prize of a lottery.
     function get_lotteryWinnerPrize(uint _lotteryNumber) external view returns (uint) {
         return getLotteryWinnerPrize(_lotteryNumber);
+    }
+
+    /// @notice Returns the number of tickets that can be purchased at the current ticket price with the input value.
+    /// @param _value The value that we are checking.
+    /// @return The number of tickets that can be purchased at the current ticket price with the input value.
+    function get_numTickets(uint _value) external view returns (uint) {
+        return getNumTickets(_value);
     }
 
     /// @notice Returns the operator address.
