@@ -86,8 +86,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice This contract is corrupt.
     error CorruptContractError();
 
-    /// @notice Drawing a winning ticket is not allowed at this time.
-    error DrawWinningTicketError();
+    /// @notice Drawing a winning ticket is not permitted at this time.
+    error DrawNotPermittedError();
 
     /// @notice The lottery active blocks must be greater than zero and cannot exceed the maximum allowed value.
     error InvalidLotteryActiveBlocksError(uint requestedLotteryActiveBlocks, uint maxLotteryActiveBlocks);
@@ -706,10 +706,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function isDrawPermitted() private view returns (bool) {
-        // Once a winning ticket for a lottery has been drawn, no further draws for that lottery are allowed. 
-        // If the winning ticket has not been drawn yet, we allow for a retry if Chainlink hasn't given us the random number after a certain number of blocks after the request.
+        // After the first draw, we allow for redraws if Chainlink hasn't given us the random number after a certain number of blocks after the request.
         // This would be needed if Chainlink ever experiences an outage.
-        return !winningTicketFlag && (!chainlinkRequestIdFlag || (block.number - chainlinkRequestIdBlockNumber > CHAINLINK_REQUEST_RETRY_BLOCKS));
+        return !chainlinkRequestIdFlag || (block.number - chainlinkRequestIdBlockNumber > CHAINLINK_REQUEST_RETRY_BLOCKS);
     }
 
     function isLocked() private view returns (bool) {
@@ -806,7 +805,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function requireDrawPermitted() private view {
         if(!isDrawPermitted()) {
-            revert DrawWinningTicketError();
+            revert DrawNotPermittedError();
         }
     }
 
@@ -1345,6 +1344,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock();
 
         requireLotteryInactive();
+        requireNoWinningTicketDrawn();
         requireDrawPermitted();
 
         drawWinningTicket();
