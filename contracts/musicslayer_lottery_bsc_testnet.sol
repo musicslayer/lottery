@@ -227,7 +227,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     // Note that the winner always receives the entire "bonusPrizePool" amount.
-    uint private constant OPERATOR_CUT = 10;
+    uint private constant OPERATOR_CUT = 5;
+
+    // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the owner takes every game.
+    // Note that the winner always receives the entire "bonusPrizePool" amount.
+    uint private constant OWNER_CUT = 5;
 
     /*
         Chainlink Constants
@@ -478,9 +482,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             _winnerAddress = findWinnerAddress(winningTicket);
 
             uint _operatorPrize = _playerPrizePool * OPERATOR_CUT / 100;
-            _winnerPrize = _playerPrizePool + _bonusPrizePool - _operatorPrize;
+            uint _ownerPrize = _playerPrizePool * OWNER_CUT / 100;
+            _winnerPrize = _playerPrizePool + _bonusPrizePool - _operatorPrize - _ownerPrize;
 
             addAddressClaimableBalance(getOperatorAddress(), _operatorPrize);
+            addAddressClaimableBalance(getOwnerAddress(), _ownerPrize);
             addAddressClaimableBalance(_winnerAddress, _winnerPrize);
 
             subtractPlayerPrizePool(_playerPrizePool);
