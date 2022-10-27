@@ -89,6 +89,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice Drawing a winning ticket is not allowed at this time.
     error DrawWinningTicketError();
 
+    /// @notice The lottery active blocks must be greater than zero and cannot exceed the maximum allowed value.
+    error InvalidLotteryActiveBlocksError(uint requestedLotteryActiveBlocks, uint maxLotteryActiveBlocks);
+
+    /// @notice The ticket price must be greater than zero and cannot exceed the maximum allowed value.
+    error InvalidTicketPriceError(uint requestedTicketPrice, uint maxTicketPrice);
+
     /// @notice The current lottery is active.
     error LotteryActiveError();
 
@@ -97,12 +103,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice The lottery is not canceled.
     error LotteryNotCanceledError(uint lotteryNumber);
-
-    /// @notice The number of active blocks for a lottery cannot exceed the maximum allowed value.
-    error MaxLotteryActiveBlocksError(uint requestedLotteryActiveBlocks, uint maxLotteryActiveBlocks);
-
-    /// @notice The ticket price cannot exceed the maximum allowed value.
-    error MaxTicketPriceError(uint requestedTicketPrice, uint maxTicketPrice);
 
     /// @notice This transaction is attempting to purchase too many tickets.
     error MaxTicketPurchaseError(uint requestedTicketPurchase, uint maxTicketPurchase);
@@ -148,12 +148,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice The withdraw is not allowed.
     error WithdrawError(uint requestedValue, uint operatorContractBalance);
-
-    /// @notice A lottery cannot have zero active blocks.
-    error ZeroLotteryActiveBlocksError();
-
-    /// @notice A ticket price of zero is not allowed.
-    error ZeroTicketPriceError();
     
     /*
     *
@@ -346,6 +340,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     constructor(uint _initialLotteryActiveBlocks, uint _initialTicketPrice) VRFV2WrapperConsumerBase(CHAINLINK_TOKEN_ADDRESS, CHAINLINK_WRAPPER_ADDRESS) payable {
         assert(block.chainid == CHAIN_ID);
 
+        requireValidLotteryActiveBlocks(_initialLotteryActiveBlocks);
+        requireValidTicketPrice(_initialTicketPrice);
+
         updateReferenceBlock();
 
         addContractFunds(msg.value);
@@ -439,10 +436,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     function drawWinningTicket() private {
-        if(!isDrawPermitted()) {
-            revert DrawWinningTicketError();
-        }
-
         if(isZeroPlayerGame() || isOnePlayerGame()) {
             // Don't bother paying Chainlink for a random number.
             recordWinningTicket(0);
@@ -778,6 +771,14 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return _value <= getAllowedTokenWithdrawBalance(_tokenAddress);
     }
 
+    function isValidLotteryActiveBlocks(uint _lotteryActiveBlocks) private pure returns (bool) {
+        return _lotteryActiveBlocks > 0 && _lotteryActiveBlocks <= MAX_LOTTERY_ACTIVE_BLOCKS;
+    }
+
+    function isValidTicketPrice(uint _ticketPrice) private pure returns (bool) {
+        return _ticketPrice > 0 && _ticketPrice <= MAX_TICKET_PRICE;
+    }
+
     function isWinningTicketDrawn() private view returns (bool) {
         return winningTicketFlag;
     }
@@ -798,6 +799,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function requireCorruptContract() private view {
         if(!isCorruptContract()) {
             revert NotCorruptContractError();
+        }
+    }
+
+    function requireDrawPermitted() private view {
+        if(!isDrawPermitted()) {
+            revert DrawWinningTicketError();
         }
     }
 
@@ -876,6 +883,18 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function requireTokenWithdrawAllowed(address _tokenAddress, uint _value) private view {
         if(!isTokenWithdrawAllowed(_tokenAddress, _value)) {
             revert TokenWithdrawError(_tokenAddress, _value, getTokenBalance(_tokenAddress), getTokenMinimumReserve(_tokenAddress));
+        }
+    }
+
+    function requireValidLotteryActiveBlocks(uint _lotteryActiveBlocks) private pure {
+        if(!isValidLotteryActiveBlocks(_lotteryActiveBlocks)) {
+            revert InvalidLotteryActiveBlocksError(_lotteryActiveBlocks, MAX_LOTTERY_ACTIVE_BLOCKS);
+        }
+    }
+
+    function requireValidTicketPrice(uint _ticketPrice) private pure {
+        if(!isValidTicketPrice(_ticketPrice)) {
+            revert InvalidTicketPriceError(_ticketPrice, MAX_TICKET_PRICE);
         }
     }
 
@@ -1095,14 +1114,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function setLotteryActiveBlocks(uint _nextLotteryActiveBlocks) private {
         // Do not set the current active lottery blocks here. When the next lottery starts, the current active lottery blocks will be updated.
-        if(_nextLotteryActiveBlocks == 0) {
-            revert ZeroLotteryActiveBlocksError();
-        }
-
-        if(_nextLotteryActiveBlocks > MAX_LOTTERY_ACTIVE_BLOCKS) {
-            revert MaxLotteryActiveBlocksError(_nextLotteryActiveBlocks, MAX_LOTTERY_ACTIVE_BLOCKS);
-        }
-
         nextLotteryActiveBlocks = _nextLotteryActiveBlocks;
     }
 
@@ -1130,14 +1141,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function setTicketPrice(uint _nextTicketPrice) private {
         // Do not set the current ticket price here. When the next lottery starts, the current ticket price will be updated.
-        if(_nextTicketPrice == 0) {
-            revert ZeroTicketPriceError();
-        }
-
-        if(_nextTicketPrice > MAX_TICKET_PRICE) {
-            revert MaxTicketPriceError(_nextTicketPrice, MAX_TICKET_PRICE);
-        }
-
         nextTicketPrice = _nextTicketPrice;
     }
 
@@ -1328,6 +1331,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock();
 
         requireLotteryInactive();
+        requireDrawPermitted();
 
         drawWinningTicket();
 
@@ -1863,6 +1867,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock();
 
         requireOperatorAddress(msg.sender);
+        requireValidLotteryActiveBlocks(_nextLotteryActiveBlocks);
 
         setLotteryActiveBlocks(_nextLotteryActiveBlocks);
 
@@ -1875,6 +1880,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         lock();
 
         requireOperatorAddress(msg.sender);
+        requireValidTicketPrice(_nextTicketPrice);
 
         setTicketPrice(_nextTicketPrice);
 
