@@ -95,6 +95,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice The ticket price must be greater than zero and cannot exceed the maximum allowed value.
     error InvalidTicketPriceError(uint requestedTicketPrice, uint maxTicketPrice);
 
+    /// @notice This transaction is attempting to purchase more tickets than the maximum allowed value.
+    error InvalidTicketPurchaseError(uint requestedTicketNumber, uint maxTicketNumber);
+
     /// @notice The current lottery is active.
     error LotteryActiveError();
 
@@ -103,9 +106,6 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     /// @notice The lottery is not canceled.
     error LotteryNotCanceledError(uint lotteryNumber);
-
-    /// @notice This transaction is attempting to purchase too many tickets.
-    error MaxTicketPurchaseError(uint requestedTicketPurchase, uint maxTicketPurchase);
 
     /// @notice A winning ticket has not been drawn yet.
     error NoWinningTicketDrawnError();
@@ -217,7 +217,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     // This is the maximum number of tickets that can be purchased in a single transaction.
     // Note that players can use additional transactions to purchase more tickets.
-    uint private constant MAX_TICKET_PURCHASE = 10_000;
+    uint private constant MAX_TICKET_PURCHASE_NUMBER = 10_000;
     
     // An integer between 0 and 100 representing the percentage of the "playerPrizePool" amount that the operator takes every game.
     // Note that the winner always receives the entire "bonusPrizePool" amount.
@@ -373,6 +373,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         else {
             requireLotteryActive();
             requireNotCorruptContract();
+            requireValidTicketPurchase(msg.value);
 
             buyTickets(msg.sender, msg.value);
         }
@@ -390,11 +391,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         uint _currentTicketNumber = currentTicketNumber;
         uint _lotteryNumber = lotteryNumber;
         uint _ticketPrice = ticketPrice;
-
-        uint _numTickets = _value / _ticketPrice;
-        if(_numTickets > MAX_TICKET_PURCHASE) {
-            revert MaxTicketPurchaseError(_numTickets, MAX_TICKET_PURCHASE);
-        }
+        
+        uint _numTickets = getNumTickets(_value);
 
         addAddressTickets(_lotteryNumber, _address, _numTickets, _ticketPrice);
         addAddressClaimableBalance(_address, _value - (_numTickets * _ticketPrice));
@@ -779,6 +777,10 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return _ticketPrice > 0 && _ticketPrice <= MAX_TICKET_PRICE;
     }
 
+    function isValidTicketPurchase(uint _value) private view returns (bool) {
+        return getNumTickets(_value) <= MAX_TICKET_PURCHASE_NUMBER;
+    }
+
     function isWinningTicketDrawn() private view returns (bool) {
         return winningTicketFlag;
     }
@@ -898,6 +900,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         }
     }
 
+    function requireValidTicketPurchase(uint _value) private view {
+        if(!isValidTicketPurchase(_value)) {
+            revert InvalidTicketPurchaseError(getNumTickets(_value), MAX_TICKET_PURCHASE_NUMBER);
+        }
+    }
+
     function requireWinningTicketDrawn() private view {
         if(!isWinningTicketDrawn()) {
             revert NoWinningTicketDrawnError();
@@ -1002,6 +1010,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
 
     function getLotteryWinnerPrize(uint _lotteryNumber) private view returns (uint) {
         return map_lotteryNum2WinnerPrize[_lotteryNumber];
+    }
+
+    function getNumTickets(uint _value) private view returns (uint) {
+        // Tickets can only be purchased in whole number quantities.
+        return _value / ticketPrice;
     }
 
     function getOperatorAddress() private view returns (address) {
@@ -1273,6 +1286,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requireLotteryActive();
         requireNotCorruptContract();
         requirePlayerAddress(msg.sender);
+        requireValidTicketPurchase(msg.value);
 
         buyTickets(msg.sender, msg.value);
 
