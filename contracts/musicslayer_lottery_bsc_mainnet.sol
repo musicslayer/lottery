@@ -1413,11 +1413,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         unlock();
     }
 
-    /// @notice The operator can call this to deposit funds in the contract.
+    /// @notice Anyone can call this to deposit funds in the contract. Note that only the operator can withdraw these funds.
     function deposit_contractFunds() external payable {
         lock();
-
-        requireOperatorAddress(msg.sender);
 
         depositContractFunds(msg.value);
 
