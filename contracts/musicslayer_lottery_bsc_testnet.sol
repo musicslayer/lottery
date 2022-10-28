@@ -113,6 +113,9 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @notice This contract is not corrupt.
     error NotCorruptContractError();
 
+    /// @notice There is not enough Chainlink to operate the contract.
+    error NotEnoughChainlinkError(uint chainlinkBalance, uint requiredChainlinkBalance);
+
     /// @notice The calling address is not the operator.
     error NotOperatorError(address _address, address operatorAddress);
 
@@ -238,6 +241,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     uint private constant CHAINLINK_MINIMUM_RESERVE = 40 * 10 ** CHAINLINK_TOKEN_DECIMALS; // 40 LINK
     uint16 private constant CHAINLINK_REQUEST_CONFIRMATION_BLOCKS = 200; // Use the maximum allowed value of 200 blocks to be extra secure.
     uint16 private constant CHAINLINK_REQUEST_RETRY_BLOCKS = 600;
+    uint private constant CHAINLINK_REQUIRED_BALANCE = 10 ** CHAINLINK_TOKEN_DECIMALS; // 1 LINK
     uint private constant CHAINLINK_RETRY_MAX = 10;
     uint private constant CHAINLINK_TOKEN_DECIMALS = 18;
     
@@ -709,6 +713,11 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         return !chainlinkRequestIdFlag || getRemainingBlocksBeforeRedraw() == 0;
     }
 
+    function isEnoughChainlink() private view returns (bool) {
+        // If there are multiple players, we should have at least 1 Chainlink to ensure smooth operation.
+        return isZeroPlayerGame() || isOnePlayerGame() || getTokenBalance(CHAINLINK_TOKEN_ADDRESS) >= CHAINLINK_REQUIRED_BALANCE;
+    }
+
     function isLocked() private view returns (bool) {
         return lockFlag;
     }
@@ -804,6 +813,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     function requireDrawPermitted() private view {
         if(!isDrawPermitted()) {
             revert DrawNotPermittedError();
+        }
+    }
+
+    function requireEnoughChainlink() private view {
+        if(!isEnoughChainlink()) {
+            revert NotEnoughChainlinkError(getTokenBalance(CHAINLINK_TOKEN_ADDRESS), CHAINLINK_REQUIRED_BALANCE);
         }
     }
 
@@ -1357,6 +1372,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requireLotteryInactive();
         requireNoWinningTicketDrawn();
         requireDrawPermitted();
+        requireEnoughChainlink();
 
         drawWinningTicket();
 
@@ -1577,6 +1593,12 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     /// @return Whether drawing a winning ticket is permitted.
     function query_isDrawPermitted() external view returns (bool) {
         return isDrawPermitted();
+    }
+
+    /// @notice Returns whether there is enough Chainlink to operate the lottery.
+    /// @return Whether there is enough Chainlink to operate the lottery.
+    function query_isEnoughChainlink() external view returns (bool) {
+        return isEnoughChainlink();
     }
 
     /// @notice Returns whether the contract is currently locked.
