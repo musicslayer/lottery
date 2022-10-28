@@ -364,7 +364,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
     }
 
     receive() external payable {
-        // Funds received from a player will be used to buy tickets. Funds received from the operator will be counted as contract funds.
+        // Funds received from a player will be used to purchase tickets. Funds received from the operator will be counted as contract funds.
         lock();
 
         if(isOperatorAddress(msg.sender)) {
@@ -375,7 +375,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             requireNotCorruptContract();
             requireValidTicketPurchase(msg.value);
 
-            buyTickets(msg.sender, msg.value);
+            purchaseTickets(msg.sender, msg.value);
         }
 
         unlock();
@@ -385,7 +385,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         Action Functions
     */
 
-    function buyTickets(address _address, uint _value) private {
+    function purchaseTickets(address _address, uint _value) private {
         // Purchase as many tickets as possible for the address with the provided value. Note that tickets can only be purchased in whole number quantities.
         // After spending all the funds on tickets, anything left over will be added to the address's claimable balance.
         uint _currentTicketNumber = currentTicketNumber;
@@ -1255,7 +1255,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
             return;
         }
 
-        // Check for a player prize pool that doesn't match the money used to buy tickets.
+        // Check for a player prize pool that doesn't match the money used to purchase tickets.
         if(getTotalTickets() * ticketPrice != playerPrizePool) {
             setCorruptContract(true);
             emit ValidationFailed(5);
@@ -1289,8 +1289,8 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         Action Functions
     */
 
-    /// @notice Players can call this to buy tickets for the current lottery, but only if it is still active and the contract is not corrupt.
-    function action_buyTickets() external payable {
+    /// @notice Players can call this to purchase tickets for the current lottery, but only if it is still active and the contract is not corrupt.
+    function action_purchaseTickets() external payable {
         lock();
 
         requireLotteryActive();
@@ -1298,7 +1298,7 @@ contract MusicslayerLottery is VRFV2WrapperConsumerBase {
         requirePlayerAddress(msg.sender);
         requireValidTicketPurchase(msg.value);
 
-        buyTickets(msg.sender, msg.value);
+        purchaseTickets(msg.sender, msg.value);
 
         unlock();
     }
