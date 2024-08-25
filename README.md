@@ -1,4 +1,4 @@
-# lottery
+# Lottery Smart Contract
 A lottery implemented in a solidity smart contract.<br/><br/>
 This contract is not currently deployed or operational, and is merely used as an educational tool to demonstrate certain smart contract functionality.
 
