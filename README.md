@@ -16,7 +16,7 @@ The contract separates any native coins into 5 categories:
 - Claimable Balance Pool - The funds that have not yet been claimed.
 - Contract Funds - The general funds owned by the contract.
 - Player Prize Pool - The funds players have paid to purchase tickets.
-- Refund Pool - The funds that were in the Player Prize Pool for a lottery that was canceled.
+- Refund Pool - The funds that were in the Player Prize Pool for a drawing that was canceled.
 
 Anything else not accounted for is considered to be extra funds. The operator can only withdraw from the contract funds and the extra funds.<br/><br/>
 (Extra funds are certain coins that may be added to the contract outside of normal lottery activities, such as through a coinbase transaction. Also, tokens are not included in this accounting and can be freely withdrawn by the contract operator, with the exception of Chainlink which has a minimum balance requirement.)
@@ -39,8 +39,19 @@ The operator may choose to pay a penalty fee and cancel the current drawing. In 
 
 ### Self-Destruct
 The owner may call self-destruct on the contract, however two conditions must first be met:
-- The contract must be corrupt (as described below).
-- A grace period must pass to allow players to withdraw any funds from the contract.
+- The contract must be marked as corrupt (described below).
+- After that, a grace period must pass to allow players to withdraw any funds from the contract.
+
+The owner may call a "validate" function that performs certain checks:
+- Check for a hard fork.
+- Check to see if the block time has drifted too high.
+- Check for a locked contract.
+- Check for the incorrect accounting of the contract balance.
+- Check for a player prize pool that doesn't match the money used to purchase tickets.
+- Check for an incorrect counting of tickets.
+- Check to see if a drawing has not ended in a long time.
+
+If any of these has occurred, the contract is marked as corrupt.
 
 ## Contract
 The lottery contract is not currently deployed.<br/><br/>
